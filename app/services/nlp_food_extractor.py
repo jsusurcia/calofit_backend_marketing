@@ -32,6 +32,7 @@ from app.models.alimento import Alimento
 from app.models.alimento_alias import AlimentoAlias
 from app.models.alimento_unidad import AlimentoUnidad
 from app.services.asistente_nutricion import coherencia_proteina_platos
+from app.services.nutricional_result import validar_macros_atwater
 
 # Si un ítem sale con kcal extremadamente alto, solo advertimos (no bloquea registro).
 # Esto evita registros absurdos por cantidades/unidades mal interpretadas.
@@ -124,16 +125,24 @@ NEGACION_PATRONES = [
 ]
 
 # Palabras que claramente NO son alimentos → nunca consultar USDA con ellas
-NO_ALIMENTOS = {
+NO_ALIMENTOS: frozenset[str] = frozenset({
     "unicornio", "dragon", "flobonix", "zombie", "alien", "cripton",
     "monstruo", "magico", "invisible", "virtual", "digital", "fake",
-}
+})
 
-# Palabras que claramente NO son alimentos → nunca consultar USDA con ellas
-NO_ALIMENTOS = {
-    "unicornio", "dragon", "flobonix", "zombie", "alien", "cripton",
-    "monstruo", "magico", "invisible", "virtual", "digital", "fake",
-}
+# Modificadores ficticios: si acompañan a cualquier sustantivo, el ítem es ficticio.
+# Ej: "carne de unicornio", "huevo de dragón", "leche de fénix" → BLOQUEADO.
+_MODIFICADORES_FICTICIOS: frozenset[str] = frozenset({
+    "unicornio", "dragon", "fenix", "centauro", "hada", "mitico",
+    "olimpico", "fantasia", "magico", "mitologico", "quimera",
+    "grifo", "hidra", "ciclope", "sirena", "pixie", "goblin",
+})
+
+
+def contiene_modificador_ficticio(mensaje: str) -> bool:
+    """Devuelve True si el mensaje contiene algún modificador de ingrediente ficticio."""
+    tokens = set(_norm(mensaje).split())
+    return bool(tokens & _MODIFICADORES_FICTICIOS)
 
 
 # Números en texto → float (para detectar cantidades extremas)
@@ -165,6 +174,19 @@ UNIDADES_GLOBALES: dict[str, float] = {
     "tarro": 400.0,
     "bolsita": 50.0,
     "paquete": 100.0,
+    # Unidades de masa/volumen explícitas — 1 unidad = N gramos/ml
+    # CRÍTICO: sin estas entradas el fallback 100.0 causa multiplicación ×100
+    "g": 1.0,
+    "gr": 1.0,
+    "gramo": 1.0,
+    "gramos": 1.0,
+    "kg": 1000.0,
+    "kilo": 1000.0,
+    "kilogramo": 1000.0,
+    "ml": 1.0,
+    "cc": 1.0,
+    "l": 1000.0,
+    "litro": 1000.0,
 }
 
 # ─── Pesos específicos por alimento cuando la unidad es "unidad" ──────────────
@@ -282,23 +304,28 @@ class NLPFoodExtractor:
         if alias:
             return self.db.query(Alimento).filter(Alimento.id == alias.alimento_id).first()
         # 3. Búsqueda por palabra inicial exacta: "papa" NO debe coincidir con "papaya"
-        #    Usamos LIKE "papa %" OR nombre = "papa" para evitar falsos positivos
+        #    Usamos LIKE "papa %" para evitar falsos positivos.
+        #    REGLA 6: ORDER BY LENGTH ASC → preferir el nombre más corto/específico.
+        #    Evita que "fruta" matchee "Ensalada de Frutas" (381 kcal) en lugar de
+        #    "Fruta Seca" o el alimento individual correcto.
+        from sqlalchemy import func as _sqlfunc
         a3 = (
             self.db.query(Alimento)
             .filter(Alimento.nombre_normalizado.like(f"{n} %"))
-            .order_by(Alimento.id.asc())
+            .order_by(_sqlfunc.length(Alimento.nombre_normalizado).asc())
             .first()
         )
         if a3:
             return a3
-        # 4. Fallback amplio: el nombre buscado aparece en cualquier posición
+        # 4. Fallback amplio: el nombre buscado aparece en cualquier posición.
+        #    REGLA 6: ORDER BY LENGTH ASC garantiza que "Fruta" (genérico corto) tenga
+        #    prioridad sobre "Ensalada de Frutas" o "Mezcla de Frutas" (compuestos largos).
         a4 = (
             self.db.query(Alimento)
             .filter(Alimento.nombre_normalizado.like(f"%{n}%"))
             .order_by(
-                # Priorizar los que empiezan con el término buscado
                 Alimento.nombre_normalizado.like(f"{n}%").desc(),
-                Alimento.id.asc()
+                _sqlfunc.length(Alimento.nombre_normalizado).asc(),
             )
             .first()
         )
@@ -447,9 +474,15 @@ class NLPFoodExtractor:
         except Exception:
             return None
 
-    def _guardar_en_bd(self, nombre_es: str, macros: dict) -> Optional[Alimento]:
-        """Guarda un alimento nuevo en BD para evitar llamar USDA la próxima vez."""
+    def _guardar_en_bd(
+        self,
+        nombre_es: str,
+        macros: dict,
+        fuente: str = "USDA (auto-aprendido)",
+    ) -> Optional[Alimento]:
+        """Guarda un alimento nuevo en BD. REGLA 4: siempre propaga fuente y flags de confianza."""
         try:
+            _es_estimado = "groq" in fuente.lower() or "estimado" in fuente.lower()
             a = Alimento(
                 nombre=nombre_es,
                 nombre_normalizado=_norm(nombre_es),
@@ -460,16 +493,26 @@ class NLPFoodExtractor:
                 fibra_100g=macros.get("fibra_100g", 0),
                 azucar_100g=macros.get("azucar_100g", 0),
                 categoria="Otros",
-                fuente="USDA (auto-aprendido)",
+                fuente=fuente,
+                es_confiable=not _es_estimado,
+                pendiente_validacion=_es_estimado,
             )
+            _ok, _motivo = validar_macros_atwater(
+                a.calorias_100g, a.proteina_100g, a.carbohidratos_100g, a.grasas_100g
+            )
+            if not _ok:
+                from app.core.logging_config import get_logger as _gl
+                _gl("nlp_extractor").warning("Alimento '%s' descartado — %s", nombre_es, _motivo)
+                return None
             self.db.add(a)
-            self.db.commit()
-            self.db.refresh(a)
-            print(f"[NLPExtractor] Nuevo alimento guardado en BD: '{nombre_es}'")
+            self.db.flush()   # Fix 2: flush mantiene la transacción del caller intacta
+            from app.core.logging_config import get_logger as _gl
+            _gl("nlp_extractor").info("Nuevo alimento '%s' (fuente=%s)", nombre_es, fuente)
             return a
         except Exception as e:
             self.db.rollback()
-            print(f"[NLPExtractor] Error guardando en BD: {e}")
+            from app.core.logging_config import get_logger as _gl
+            _gl("nlp_extractor").error("Error guardando '%s': %s", nombre_es, e)
             return None
 
     # ─── PASO 4b: Fallback Groq cuando BD y USDA fallan ─────────────────────
@@ -564,27 +607,23 @@ class NLPFoodExtractor:
         # ── Paso 1: BD local con nombre completo (alias incluidos) ───────────
         alim = self._buscar_alimento_bd(parte)
         if alim:
-            print(f"[NLPExtractor] '{parte}' → BD: '{alim.nombre}'")
             return alim
 
         # ── Paso 2: USDA con el nombre COMPLETO y específico ─────────────────
         macros_usda = self._buscar_usda(parte)
         if macros_usda:
-            guardado = self._guardar_en_bd(parte, macros_usda)
+            guardado = self._guardar_en_bd(parte, macros_usda, "USDA (auto-aprendido)")
             if guardado:
-                print(f"[NLPExtractor] '{parte}' → USDA → guardado en BD")
                 return guardado
 
         # ── Paso 3: Groq estima con nombre específico y guarda en BD ─────────
-        print(f"[NLPExtractor] '{parte}' → Groq fallback")
+        # REGLA 4: fuente "Groq (estimado)" → es_confiable=False, pendiente_validacion=True
         macros_groq = await self._groq_estimar_macros(parte)
         if macros_groq:
-            guardado = self._guardar_en_bd(parte, macros_groq)
+            guardado = self._guardar_en_bd(parte, macros_groq, "Groq (estimado)")
             if guardado:
-                print(f"[NLPExtractor] '{parte}' estimado por Groq → guardado en BD")
                 return guardado
 
-        print(f"[NLPExtractor] '{parte}' no encontrado en ninguna fuente")
         return None
 
     async def _calcular_macros_plato_combinado(self, nombre: str, cantidad: float,
@@ -943,17 +982,17 @@ class NLPFoodExtractor:
                 if not alimento_bd:
                     macros_usda = self._buscar_usda(nombre)
                     if macros_usda:
-                        alimento_bd = self._guardar_en_bd(nombre, macros_usda)
+                        # REGLA 4: fuente correcta para trazabilidad
+                        alimento_bd = self._guardar_en_bd(nombre, macros_usda, "USDA (auto-aprendido)")
                         origen = "usda"
 
                 # PASO 4b: Última instancia → Groq estima macros por 100g
+                # REGLA 4: fuente "Groq (estimado)" → es_confiable=False, pendiente_validacion=True
                 if not alimento_bd:
-                    print(f"[NLPExtractor] Groq fallback para '{nombre}'")
                     macros_groq = await self._groq_estimar_macros(nombre)
                     if macros_groq:
-                        alimento_bd = self._guardar_en_bd(nombre, macros_groq)
+                        alimento_bd = self._guardar_en_bd(nombre, macros_groq, "Groq (estimado)")
                         origen = "groq"
-                        print(f"[NLPExtractor] Groq estimó '{nombre}': {macros_groq}")
 
                 if not alimento_bd:
                     advertencias.append(f"No encontré datos para '{nombre}'")

@@ -15,6 +15,17 @@ RECOMENDAR_EJERCICIO = "recomendar_ejercicio"
 REGISTRAR_EJERCICIO = "registrar_ejercicio"
 OTRO = "otro"
 
+# Verbos imperativos que indican registro explícito — tienen prioridad sobre el LLM.
+# Si el mensaje COMIENZA con alguno de estos, se fuerza REGISTRAR_NUTRICION sin LLM.
+_VERBOS_IMPERATIVOS_REGISTRO: tuple[str, ...] = (
+    "regístrame", "registrame", "registra que", "registra el", "registra la",
+    "anota que", "anota el", "anota la", "anótame",
+    "guarda que", "guarda el", "guarda la", "guárdame",
+    "ponme", "ponme en", "agrégame", "agregame",
+    "apunta el", "apunta la", "apunta que",
+)
+
+
 MODOS_ASISTENTE = frozenset(
     {
         RECOMENDAR_NUTRICION,
@@ -52,6 +63,11 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     m = (mensaje or "").lower().strip()
     if len(m) < 2:
         return OTRO
+
+    # ── Prioridad máxima: verbo imperativo de registro ────────────────────────
+    # "Regístrame el ceviche de caballa" → REGISTRAR_NUTRICION inmediato (sin LLM)
+    if any(m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
+        return REGISTRAR_NUTRICION
 
     comida_ctx = (
         "comí",
@@ -201,9 +217,14 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
 async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     """
     Prioriza clasificación semántica vía LLM (Groq); si falla o no hay API, usa reglas por palabras clave.
+    Los verbos imperativos de registro se resuelven antes del LLM para evitar degradación a RECIPE.
     """
     if es_saludo or len((mensaje or "").strip()) < 2:
         return OTRO
+    # Pre-check: verbos imperativos → nunca pasar al LLM (evita que clasifique como RECIPE)
+    _m = (mensaje or "").lower().strip()
+    if any(_m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
+        return REGISTRAR_NUTRICION
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje)
         if isinstance(modo_ia, str) and modo_ia in MODOS_ASISTENTE:

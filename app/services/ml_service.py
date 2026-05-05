@@ -15,7 +15,10 @@ import numpy as np
 from typing import List, Optional
 
 from app.core.alimentos_ux_filters import es_alimento_bloqueado_ia, nombre_coincide_exclusion
+from app.core.logging_config import get_logger
 from app.core.utils import get_peru_date
+
+logger = get_logger("ml_service")
 
 # ─────────────────────────────────────────────────────────────────────
 # RUTAS
@@ -219,6 +222,12 @@ class RecomendadorAlimentosKNN:
 
     # ── API Pública ───────────────────────────────────────────────────
 
+    # Especies Omega-3 locales de Lambayeque priorizadas en peticiones marino/omega
+    _OMEGA3_ESPECIES = frozenset({
+        "caballa", "lisa", "mero", "ojo de uva", "tollo", "cabrilla",
+        "anchoveta", "trucha", "salmon", "sardina",
+    })
+
     def obtener_recomendaciones(
         self,
         calorias_faltantes: float,
@@ -227,6 +236,7 @@ class RecomendadorAlimentosKNN:
         grasa_faltante:     float,
         n_recomendaciones:  int = 3,
         excluir_nombres:    Optional[List[str]] = None,
+        contexto:           Optional[str] = None,
     ) -> list:
         """
         Recibe el déficit del día (kcal + macros) y retorna una lista de
@@ -275,6 +285,18 @@ class RecomendadorAlimentosKNN:
             if not candidatos:
                 return []
 
+            # Boost regional Omega-3: si el contexto pide "omega", "marino" o hay
+            # alto déficit de grasas → elevar similitud de especies locales ×1.25
+            _ctx = (contexto or "").lower()
+            _omega_activo = (
+                any(kw in _ctx for kw in ("omega", "marino", "pescado", "mariscos"))
+                or grasa_faltante > 3.0
+            )
+            if _omega_activo:
+                for c in candidatos:
+                    if any(esp in c["alimento"].lower() for esp in self._OMEGA3_ESPECIES):
+                        c["similitud"] = min(99.9, round(c["similitud"] * 1.25, 1))
+
             # Misma semilla por día + vector → reproducible en tests; cambia día a día.
             seed = (
                 get_peru_date().toordinal() * 10007
@@ -299,14 +321,13 @@ class RecomendadorAlimentosKNN:
                     break
 
             if resultados:
-                print(
-                    f"[ML Recomendador] 1ra opcion: {resultados[0]['alimento']} "
-                    f"({resultados[0]['similitud']}%)"
+                logger.info(
+                    "1ra opcion: %s (%.1f%%)", resultados[0]["alimento"], resultados[0]["similitud"]
                 )
             return resultados
 
         except Exception as e:
-            print(f"[ML Recomendador] Error en inferencia: {e}")
+            logger.error("Error en inferencia KNN: %s", e)
             return []
 
     @property

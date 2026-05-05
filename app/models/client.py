@@ -63,5 +63,7 @@ class Client(Base):
     preferencias_alimentos = relationship("PreferenciaAlimento", back_populates="cliente", cascade="all, delete-orphan")
     preferencias_ejercicios = relationship("PreferenciaEjercicio", back_populates="cliente", cascade="all, delete-orphan")
 
+    comida_registros = relationship("ComidaRegistro", back_populates="cliente", cascade="all, delete-orphan")
+
     verification_code = Column(String(6), nullable=True)
     code_expires_at = Column(DateTime, nullable=True)

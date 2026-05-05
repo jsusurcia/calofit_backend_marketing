@@ -5,7 +5,7 @@ NOTA: Estas columnas están expresadas por 100g (no por porción).
 """
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -29,5 +29,8 @@ class Alimento(Base):
     categoria = Column(String(100), nullable=True)
     fuente = Column(String(255), nullable=True)
     id_externo = Column(String(100), nullable=True)
+
+    es_confiable         = Column(Boolean, default=True,  nullable=True)
+    pendiente_validacion = Column(Boolean, default=False, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

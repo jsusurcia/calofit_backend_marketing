@@ -1,13 +1,25 @@
 import os
+import warnings
 from dotenv import load_dotenv
 
 # Cargar variables de entorno desde .env
 load_dotenv()
 
+_WEAK_DEFAULTS = {"TU_CLAVE_PARA_LEY_29733", "changeme", "secret", ""}
+
 class Settings:
     PROJECT_NAME: str = "CaloFit - Gimnasio World Light"
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:leomeflo09@localhost/BD_Calofit")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "TU_CLAVE_PARA_LEY_29733")
+
+    def __init__(self) -> None:
+        if self.SECRET_KEY in _WEAK_DEFAULTS:
+            warnings.warn(
+                "SECRET_KEY usa un valor por defecto inseguro. "
+                "Generar con: python -c \"import secrets; print(secrets.token_hex(32))\" "
+                "y definir en .env antes del despliegue.",
+                stacklevel=2,
+            )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     # Timeout HTTP hacia api.groq.com (lectura; prompts largos + 1200 tokens pueden tardar).

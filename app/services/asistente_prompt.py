@@ -239,6 +239,10 @@ def construir_prompt_cliente(
         "\n6. NUNCA nombres genéricos ('Sugerencia 1', 'Opción 2') en [CALOFIT_HEADER]: usa el nombre real del plato."
         "\n7. PROHIBIDOS los alimentos del Nutricionista aunque el cliente los pida."
         "\n8. COCINA PERUANA: arroz con pollo, cebiche, lomo saltado, ají de gallina, causa, tallarines, etc."
+        "\n9. IDENTIDAD LAMBAYEQUE — OBLIGATORIO en sugerencias marinas:"
+        "\n   • Prioridad de especies: Caballa → Lisa → Mero → Tollo (en ese orden)."
+        "\n   • PROHIBIDO sugerir Atún o Salmón salvo que el usuario los pida por nombre."
+        "\n   • El Ceviche NUNCA lleva palta, tomate ni zanahoria."
         f"{bloque_saludo}"
         f"{bloque_prompt_modo_funcion(modo_funcion)}"
     )

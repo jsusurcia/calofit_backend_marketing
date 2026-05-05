@@ -24,7 +24,10 @@ from app.services.asistente_ejercicio import (
     procesar_secciones_ejercicio,
     registrar_ejercicio_desde_payload_tarjeta,
 )
-from app.services.asistente_modos import RECOMENDAR_EJERCICIO, resolver_modo_funcion
+from app.services.asistente_modos import (
+    RECOMENDAR_EJERCICIO, REGISTRAR_NUTRICION,
+    _VERBOS_IMPERATIVOS_REGISTRO, resolver_modo_funcion,
+)
 from app.services.asistente_nutricion import (
     procesar_secciones_comida,
     registrar_comida_desde_payload_tarjeta,
@@ -111,6 +114,16 @@ class AsistenteService:
 
         # Modo funcional + guard rails
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)
+
+        # ── Redirección imperativa: "Regístrame / Anota / Guarda" → NLP handler ──
+        # Evita que el flujo consultar() muestre una tarjeta RECIPE sin persistir.
+        if modo_funcion == REGISTRAR_NUTRICION and any(
+            msg_limpio.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO
+        ):
+            return await registro_comida_handler.registrar(
+                mensaje, perfil, plan_hoy_data, db, self.ia
+            )
+
         if strict_ask_missing_enabled():
             falt = detectar_faltantes(modo_funcion, mensaje)
             if falt:
