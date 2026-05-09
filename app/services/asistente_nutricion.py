@@ -2666,7 +2666,8 @@ async def procesar_secciones_comida(
         and not s.get("_rechazar")
         and float((s.get("macros_normalizados") or {}).get("kcal") or 0) > 0
     ]
-    if not _comidas_con_datos and db:
+    _modo = respuesta_estructurada.get("modo_funcion", "")
+    if not _comidas_con_datos and db and _modo == "recomendar_nutricion":
         logger.warning(
             "[FASE4] Todas las comidas rechazadas o kcal=0 — "
             "activando fallback garantizado (momento=%s, tdee=%.0f)",

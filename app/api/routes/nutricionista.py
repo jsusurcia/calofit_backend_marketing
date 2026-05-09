@@ -17,9 +17,15 @@ from app.core.security import security
 
 router = APIRouter()
 
+_ROLES_PERMITIDOS = {
+    "nutricionista", "nutritionist", "nutri",
+    "admin", "administrador",
+    "coach", "entrenador",
+}
+
 def check_is_nutri(current_user: User):
     role = str(getattr(current_user, "role_name", "")).lower()
-    if role not in ["nutricionista", "nutritionist", "admin", "administrador", "coach", "entrenador"]:
+    if role not in _ROLES_PERMITIDOS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operación permitida solo para Staff (Nutricionistas, Coaches o Admin)"
@@ -63,12 +69,16 @@ def create_express_patient(
     """
     check_is_nutri(current_user)
     
-    # 1. Comprobar si el correo ya existe en la Base de Datos Local
-    existing_user = db.query(Client).filter(Client.email == client_data.email).first()
-    if existing_user:
+    # 1. Comprobar si el correo ya existe — en clients Y en users (login único)
+    if db.query(Client).filter(Client.email == client_data.email).first():
         raise HTTPException(
-            status_code=400, 
-            detail="Este correo electrónico ya está registrado como paciente en el sistema."
+            status_code=400,
+            detail="Este correo ya está registrado como paciente en el sistema."
+        )
+    if db.query(User).filter(User.email == client_data.email).first():
+        raise HTTPException(
+            status_code=400,
+            detail="Este correo ya está registrado como staff en el sistema."
         )
 
     # 2. Generar el usuario incompleto y vincular con Firebase
@@ -105,14 +115,15 @@ def create_express_patient(
     
     nuevo_paciente = Client(
         email=client_data.email,
-        dni=client_data.dni, # 🆕 Guardamos el DNI para identificación
-        first_name="", 
-        last_name_paternal="", 
+        dni=client_data.dni,
+        first_name="",
+        last_name_paternal="",
         last_name_maternal="",
         hashed_password=hashed_dni,
-        flutter_uid=flutter_uid, # Guardamos el ID de Firebase!
+        flutter_uid=flutter_uid,
         is_profile_complete=False,
-        assigned_nutri_id=current_user.id
+        assigned_nutri_id=current_user.id,
+        assigned_coach_id=client_data.assigned_coach_id,
     )
     
     db.add(nuevo_paciente)
@@ -136,14 +147,20 @@ def get_assigned_patients(
 ):
     check_is_nutri(current_user)
     
-    # Si es Admin o Coach, ve todos los clientes. Si es Nutri, solo los suyos.
     query = db.query(Client)
     role = str(getattr(current_user, "role_name", "")).lower()
-    
-    # 🏃‍♂️ CAMBIO SOLICITADO: Los coaches pueden ver a todos para apoyarse entre sí
-    if role in ["nutricionista", "nutritionist"]:
+
+    if role in {"nutricionista", "nutritionist", "nutri"}:
+        # Nutri: solo sus asignados (incluye perfiles incompletos para que pueda gestionarlos)
         query = query.filter(Client.assigned_nutri_id == current_user.id)
-    
+    elif role in {"coach", "entrenador", "trainer"}:
+        # Coach: solo los asignados a él y que ya completaron su perfil (primer login hecho)
+        query = query.filter(
+            Client.assigned_coach_id == current_user.id,
+            Client.is_profile_complete == True,
+        )
+    # Admin: sin filtro — ve todos
+
     clients = query.all()
     
     from app.core.utils import get_peru_now
@@ -155,12 +172,18 @@ def get_assigned_patients(
         # Lógica de adherencia real: Contar días con registros en los últimos 7 días
         registros_recientes = [r for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()]
         num_registros = len(registros_recientes)
-        
+
         adherencia = round((num_registros / 7) * 100, 1)
         progreso = calcular_progreso_paciente(c)
-        
+
         alerta_data = ia_service.generar_alerta_fuzzy(adherencia, progreso)
-        
+
+        # Check-in mensual de peso (independiente del estado del plan)
+        first_of_month = now.replace(day=1).date()
+        hizo_checkin_peso = any(
+            r.fecha_registro >= first_of_month for r in c.historial_peso
+        )
+
         result.append({
             "id": c.id,
             "full_name": f"{c.first_name} {c.last_name_paternal} {c.last_name_maternal}",
@@ -174,8 +197,9 @@ def get_assigned_patients(
             "alerta_nivel": alerta_data.get("nivel", "Bajo"),
             "gender": c.gender,
             "is_validated": c.is_strategic_guide_validated,
-            "is_profile_complete": c.is_profile_complete, # 🆕 CRÍTICO: Indica si es registro express
-            "dni": c.dni, # 🆕 Necesario para identificar pendientes
+            "is_profile_complete": c.is_profile_complete,
+            "dni": c.dni,
+            "hizo_checkin_peso": hizo_checkin_peso,
             "semana_status": _calcular_mes_status(c, db)
         })
     
@@ -292,7 +316,9 @@ def get_patient_progress(
         "current_height": client.height,
         "recommended_foods": client.recommended_foods,
         "forbidden_foods": client.forbidden_foods,
-        "medical_conditions": client.medical_conditions
+        "medical_conditions": client.medical_conditions,
+        "coach_notes": client.coach_notes,
+        "nutri_weekly_note": client.nutri_weekly_note,
     }
 
 @router.get("/cliente/{id}/sugerir-estrategia")
@@ -542,103 +568,125 @@ def get_nutri_stats(
     current_user: User = Depends(get_current_user)
 ):
     check_is_nutri(current_user)
-    
-    # 1. Filtro base de pacientes asignados
+
+    _ROLES_NUTRI  = {"nutricionista", "nutritionist", "nutri"}
+    _ROLES_COACH  = {"coach", "entrenador", "trainer"}
+
+    # ── Bug 1 & 2: filtro correcto por rol ───────────────────────────────
+    role  = str(getattr(current_user, "role_name", "")).lower()
     query = db.query(Client)
-    role = str(getattr(current_user, "role_name", "")).lower()
-    if role in ["nutricionista", "nutritionist"]:
+    if role in _ROLES_NUTRI:
         query = query.filter(Client.assigned_nutri_id == current_user.id)
-    
-    pacientes = query.all()
+    elif role in _ROLES_COACH:
+        query = query.filter(
+            Client.assigned_coach_id == current_user.id,
+            Client.is_profile_complete == True,
+        )
+    # Admin: sin filtro
+
+    pacientes       = query.all()
     total_pacientes = len(pacientes)
-    
+    paciente_ids    = {c.id for c in pacientes}
+
     if total_pacientes == 0:
         return {
             "total_pacientes": 0,
             "validaciones_pendientes": 0,
             "alertas_criticas": 0,
             "adherencia_media": 0.0,
-            "tendencia_adherencia": [0,0,0,0,0,0,0]
+            "tendencia_adherencia": [0, 0, 0, 0, 0, 0, 0],
+            "alertas_recientes": [],
         }
 
-    # 2. Validaciones Pendientes (Planes en status provisional_ia)
+    # ── Validaciones pendientes ───────────────────────────────────────────
     validaciones_pendientes = db.query(PlanNutricional).join(Client).filter(
-        Client.assigned_nutri_id == current_user.id if role in ["nutricionista", "nutritionist"] else True,
-        PlanNutricional.status == "provisional_ia"
+        Client.id.in_(paciente_ids),
+        PlanNutricional.status == "provisional_ia",
     ).count()
 
-    # 3. Alertas Críticas (IA + Alertas de Salud Pendientes)
-    alertas_criticas = 0
-    seven_days_ago = datetime.now() - timedelta(days=7)
-    
-    # 3.1 Alertas desde Tabla AlertaSalud (Pendientes)
-    alertas_db_query = db.query(AlertaSalud).filter(
-        AlertaSalud.estado == "pendiente"
-    ).join(Client).filter(
-        Client.assigned_nutri_id == current_user.id if role in ["nutricionista", "nutritionist"] else True
+    # ── Bug 3: alertas de BD solo de los últimos 30 días ─────────────────
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    seven_days_ago  = datetime.now() - timedelta(days=7)
+
+    alertas_db_query = (
+        db.query(AlertaSalud)
+        .filter(
+            AlertaSalud.estado == "pendiente",
+            AlertaSalud.fecha_deteccion >= thirty_days_ago,
+        )
+        .join(Client)
+        .filter(Client.id.in_(paciente_ids))
     )
     alertas_db_count = alertas_db_query.count()
-    alertas_recientes_objs = alertas_db_query.order_by(AlertaSalud.fecha_deteccion.desc()).limit(3).all()
-    
+
+    # IDs de pacientes que ya tienen alerta en BD (para no duplicar con IA)
+    pacientes_con_alerta_db = {
+        a.cliente.id for a in alertas_db_query.all() if a.cliente
+    }
+
+    alertas_recientes_objs = (
+        alertas_db_query
+        .order_by(AlertaSalud.fecha_deteccion.desc())
+        .limit(5)
+        .all()
+    )
     alertas_formateadas = [
         {
             "id": a.id,
             "paciente": f"{a.cliente.first_name} {a.cliente.last_name_paternal}",
             "problema": a.descripcion,
             "urgencia": a.severidad.capitalize(),
-            "tipo": a.tipo
-        } for a in alertas_recientes_objs
+            "tipo": a.tipo,
+        }
+        for a in alertas_recientes_objs
     ]
-    
-    # 3.2 Alertas detectadas por IA (Lógica Fuzzy)
+
+    # ── Alertas IA: solo pacientes SIN alerta en BD (evita doble conteo) ─
+    alertas_ia = 0
     for c in pacientes:
-        # Calcular adherencia simplificada para el conteo de alertas
-        registros_recientes = [r for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()]
-        adh = round((len(registros_recientes) / 7) * 100, 1)
+        if c.id in pacientes_con_alerta_db:
+            continue
+        registros_recientes = [
+            r for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()
+        ]
+        adh  = round((len(registros_recientes) / 7) * 100, 1)
         prog = calcular_progreso_paciente(c)
-        
         alerta_data = ia_service.generar_alerta_fuzzy(adh, prog)
         if alerta_data.get("nivel") == "Alto":
-            alertas_criticas += 1
-            # Si no hay muchas alertas en DB, podemos agregar alertas de IA como sugerencias
+            alertas_ia += 1
             if len(alertas_formateadas) < 5:
-                # Evitar duplicados si ya hay una alerta real para este paciente
-                if not any(al['paciente'].startswith(c.first_name) for al in alertas_formateadas):
-                    alertas_formateadas.append({
-                        "id": 0,
-                        "paciente": f"{c.first_name} {c.last_name_paternal}",
-                        "problema": "Baja adherencia/progreso (Detectado por IA)",
-                        "urgencia": "Media",
-                        "tipo": "progreso"
-                    })
-            
-    # Combinar ambas fuentes
-    total_alertas = alertas_criticas + alertas_db_count
+                alertas_formateadas.append({
+                    "id": 0,
+                    "paciente": f"{c.first_name} {c.last_name_paternal}",
+                    "problema": "Baja adherencia detectada por IA",
+                    "urgencia": "Media",
+                    "tipo": "progreso",
+                })
 
-    # 4. Adherencia Media y Tendencia (Últimos 7 días)
-    # Calculamos el promedio de registros realizados por todo el grupo por día
-    tendencia = []
-    total_adh_sum = 0
+    total_alertas = alertas_db_count + alertas_ia
+
+    # ── Adherencia media y tendencia (últimos 7 días) ─────────────────────
+    tendencia     = []
+    total_adh_sum = 0.0
     for i in range(6, -1, -1):
         target_date = (datetime.now() - timedelta(days=i)).date()
-        conteo_dia = 0
-        for c in pacientes:
-            if any(r.fecha == target_date for r in c.progreso_calorias):
-                conteo_dia += 1
-        
-        adh_dia = round((conteo_dia / total_pacientes) * 100, 1) if total_pacientes > 0 else 0
+        conteo_dia  = sum(
+            1 for c in pacientes
+            if any(r.fecha == target_date for r in c.progreso_calorias)
+        )
+        adh_dia = round((conteo_dia / total_pacientes) * 100, 1)
         tendencia.append(adh_dia)
         total_adh_sum += adh_dia
 
     adherencia_media = round(total_adh_sum / 7, 1)
 
     return {
-        "total_pacientes": total_pacientes,
+        "total_pacientes":        total_pacientes,
         "validaciones_pendientes": validaciones_pendientes,
-        "alertas_criticas": total_alertas,
-        "alertas_recientes": alertas_formateadas,
-        "adherencia_media": adherencia_media,
-        "tendencia_adherencia": tendencia
+        "alertas_criticas":       total_alertas,
+        "alertas_recientes":      alertas_formateadas,
+        "adherencia_media":       adherencia_media,
+        "tendencia_adherencia":   tendencia,
     }
 
 
@@ -691,3 +739,47 @@ def delete_client(
     db.commit()
 
     return {"status": "success", "message": f"Cliente ID {id} eliminado de la plataforma y Firebase."}
+
+
+@router.put("/cliente/{id}/nota-entrenador")
+def save_coach_note(
+    id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Guarda o actualiza la nota del entrenador sobre un cliente."""
+    check_is_nutri(current_user)
+    client = db.query(Client).filter(Client.id == id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+    client.coach_notes = payload.get("nota", "").strip() or None
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/coaches", response_model=List[dict])
+def get_coaches_list(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retorna la lista de entrenadores activos para que el nutri pueda asignarlos al crear un paciente."""
+    check_is_nutri(current_user)
+
+    _ROLES_COACH = {"coach", "entrenador", "trainer"}
+    coaches = db.query(User).filter(User.is_active == True).all()
+
+    result = []
+    for u in coaches:
+        role = str(getattr(u, "role_name", "")).lower()
+        if role not in _ROLES_COACH:
+            continue
+        full_name = f"{u.first_name or ''} {u.last_name_paternal or ''}".strip()
+        result.append({
+            "id": u.id,
+            "full_name": full_name or u.email,
+            "email": u.email,
+            "profile_picture_url": getattr(u, "profile_picture_url", None),
+        })
+
+    return result

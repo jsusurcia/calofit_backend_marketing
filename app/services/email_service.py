@@ -69,10 +69,10 @@ class EmailService:
                 """
             }
             email = resend.Emails.send(params)
-            print(f"✅ Correo de bienvenida enviado a {email_to}")
+            print(f"Correo de bienvenida enviado a {email_to}")
             return email
         except Exception as e:
-            print(f"❌ Error enviando correo de bienvenida con Resend: {e}")
+            print(f"Error enviando correo de bienvenida con Resend: {e}")
             return None
 
     @staticmethod
@@ -90,7 +90,7 @@ class EmailService:
         gmail_password = os.getenv("GMAIL_APP_PASSWORD")
         
         if not gmail_user or not gmail_password:
-            print("⚠️ Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD en el archivo .env")
+            print("Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD en el archivo .env")
             return None
 
         # Construir el Mensaje HTML premium
@@ -132,10 +132,10 @@ class EmailService:
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, email_to, msg.as_string())
             server.quit()
-            print(f"✅ Correo de bienvenida enviado a {email_to} usando GMAIL SMTP")
+            print(f"Correo de bienvenida enviado a {email_to} usando GMAIL SMTP")
             return True
         except Exception as e:
-            print(f"❌ Error crítico enviando correo vía Gmail: {e}")
+            print(f"Error crítico enviando correo vía Gmail: {e}")
             return None
 
     @staticmethod
@@ -151,7 +151,7 @@ class EmailService:
         sender_email = os.getenv("BREVO_SENDER")
         
         if not api_key or not sender_email:
-            print("⚠️ Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
             return None
 
         url = "https://api.brevo.com/v3/smtp/email"
@@ -196,10 +196,68 @@ class EmailService:
         try:
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
-            print(f"✅ Correo de bienvenida enviado a {email_to} usando BREVO API")
+            print(f"Correo de bienvenida enviado a {email_to} usando BREVO API")
             return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"❌ Error crítico enviando correo vía Brevo: {e}")
+            print(f"Error crítico enviando correo vía Brevo: {e}")
             if e.response is not None:
                 print(f"Detalle de Brevo: {e.response.text}")
+            return None
+
+    @staticmethod
+    def send_password_reset_brevo(email_to: str, code: str):
+        import requests
+        import os
+        
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
+        
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
+            return None
+
+        url = "https://api.brevo.com/v3/smtp/email"
+        
+        headers = {
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json"
+        }
+        
+        html_body = f"""
+        <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h1 style="color: #1E88E5; margin: 0; font-size: 28px;">CaloFit</h1>
+                <p style="color: #666; margin-top: 5px; font-size: 14px;">Recuperación de Contraseña</p>
+            </div>
+            
+            <p style="color: #333; font-size: 15px; line-height: 1.5;">Hola,</p>
+            <p style="color: #333; font-size: 15px; line-height: 1.5;">
+                Has solicitado restablecer tu contraseña. Ingresa el siguiente código de 6 dígitos en la aplicación:
+            </p>
+            
+            <div style="background: #F1F5F9; border-left: 4px solid #1E88E5; padding: 20px; margin: 20px 0; border-radius: 4px; text-align: center;">
+                <p style="margin: 0; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1E88E5;">{code}</p>
+            </div>
+            
+            <p style="color: #666; font-size: 12px; line-height: 1.5;">
+                Este código expirará en 15 minutos. Si no solicitaste este cambio, por favor ignora este correo.
+            </p>
+        </div>
+        """
+
+        payload = {
+            "sender": {"name": "CaloFit Seguridad", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": f"{code} es tu código de recuperación CaloFit",
+            "htmlContent": html_body
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            print(f"Código de recuperación enviado a {email_to} usando BREVO API")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error crítico enviando código vía Brevo: {e}")
             return None

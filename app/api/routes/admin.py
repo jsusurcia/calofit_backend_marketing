@@ -68,6 +68,17 @@ async def crear_personal_staff(
         "users", nuevo_usuario.id
     )
     
+    # ✉️ Enviar correo de bienvenida con credenciales usando Brevo
+    try:
+        from app.services.email_service import EmailService
+        EmailService.send_welcome_credentials_brevo(
+            email_to=usuario_data.email,
+            dni=usuario_data.password, # Se asume que la contraseña inicial es asignada aquí
+            nutricionista_name=f"{current_user.first_name} (Admin)"
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar el correo de bienvenida al staff: {e}")
+    
     return nuevo_usuario
 
 @router.get("/staff")

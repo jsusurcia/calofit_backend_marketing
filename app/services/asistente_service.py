@@ -157,6 +157,10 @@ class AsistenteService:
                    0.45 if modo_funcion == "recomendar_ejercicio" else 0.55
             respuesta_ia = await self.ia._llamar_groq(prompt=prompt_final, max_tokens=1200, temp=temp)
 
+        print("\n=== RAW LLM RESPONSE ===")
+        print(respuesta_ia)
+        print("========================\n")
+
         if self.ia.es_fallo_respuesta_llm(respuesta_ia):
             return respuesta_fallo_llm(perfil, consumo_real, calorias_meta, quemadas_real, respuesta_ia, modo_funcion)
 

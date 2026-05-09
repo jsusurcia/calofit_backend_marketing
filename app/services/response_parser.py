@@ -290,9 +290,9 @@ def parsear_respuesta_para_frontend(
                 bloque_intent_match = re.search(r'\[CALOFIT_INTENT:\s*(\w+)\]', bloque, re.IGNORECASE)
                 bloque_intent = bloque_intent_match.group(1).upper() if bloque_intent_match else resultado["intent"]
 
-                if bloque_intent in ["ITEM_WORKOUT", "WORKOUT", "EXERCISE"]:
+                if bloque_intent in ["ITEM_WORKOUT", "WORKOUT", "EXERCISE", "POWER"]:
                     tipo = "ejercicio"
-                elif bloque_intent in ["ITEM_RECIPE", "RECIPE", "FOOD", "MEAL"]:
+                elif bloque_intent in ["ITEM_RECIPE", "RECIPE", "FOOD", "MEAL", "LOG"]:
                     tipo = "comida"
                 else:
                     # 2. Fallback: Keywords en el bloque
@@ -315,6 +315,9 @@ def parsear_respuesta_para_frontend(
                     items_raw = lista.group(1).strip().split('\n')
                 else:
                     items_raw = re.findall(r'^\s*[-\*•]\s+(.+)$', bloque, re.MULTILINE)
+                    if not items_raw:
+                        # Fallback adicional: buscar líneas que mencionen 'series' o 'reps' o 'minutos'
+                        items_raw = re.findall(r'^\s*(.*?(?:series|reps|repeticiones|minutos|segundos).*)$', bloque, re.IGNORECASE | re.MULTILINE)
 
                 # v63: Solo borra bullets, NO borra el contenido entre paréntesis si parece kcal
                 items = []
@@ -340,6 +343,22 @@ def parsear_respuesta_para_frontend(
                 else:
                     # Fallback: Buscar líneas numeradas (1., 2.)
                     pasos_raw = re.findall(r'^\s*\d+[\.\)]\s+(.+)$', bloque, re.MULTILINE)
+                    if not pasos_raw:
+                        # Fallback adicional: buscar prefijos comunes de ejercicio
+                        pasos_raw = re.findall(r'^\s*(?:T[eé]cnica|Instrucciones|Nota|Tip):\s*(.+)$', bloque, re.IGNORECASE | re.MULTILINE)
+                        # Re-añadir el prefijo para mantener contexto
+                        pasos_raw = ["Técnica: " + p for p in pasos_raw] if pasos_raw else []
+                    if not pasos_raw:
+                        # Último recurso: cualquier línea libre que no parezca metadata
+                        lineas_sueltas = [
+                            ln.strip() for ln in bloque.split('\n')
+                            if ln.strip() 
+                            and not ln.strip().startswith('[')
+                            and not re.match(r'^\s*[-\*•]', ln)
+                            and not re.search(r'(?i)(kcal|calorías|duración|met\b)', ln)
+                        ]
+                        if lineas_sueltas:
+                            pasos_raw = lineas_sueltas
                     
                 # Igual para pasos, manteniendo el texto limpio
                 pasos = [re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', p).strip() for p in pasos_raw if p.strip()]

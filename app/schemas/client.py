@@ -85,6 +85,7 @@ class ClientExpressCreate(BaseModel):
     email: EmailStr
     dni: str = Field(..., min_length=7, max_length=15, description="El DNI será usado como clave temporal")
     assigned_nutri_id: Optional[int] = None
+    assigned_coach_id: Optional[int] = None
 
 class ChangePassword(BaseModel):
     new_password: str = Field(..., min_length=6)

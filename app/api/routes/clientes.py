@@ -32,9 +32,9 @@ def admin_crear_cliente(
     Crea un cliente solo con email + contraseña + firebase_uid.
     El cliente completará su perfil en el Onboarding al primer login.
     """
-    # Solo admins pueden hacer esto
-    if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin']):
-        raise HTTPException(status_code=403, detail="Solo los administradores pueden crear clientes")
+    # Permite a Administradores y Nutricionistas crear clientes
+    if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin', 'nutritionist', 'nutricionista']):
+        raise HTTPException(status_code=403, detail="Solo los administradores o nutricionistas pueden crear clientes")
 
     existe = db.query(Client).filter(Client.email == data.email).first()
     if existe:
@@ -669,12 +669,37 @@ def check_checkin_status(
     else:
         precision = 100  # Usuarios nuevos siempre al 100% el primer mes
 
-    needed = not already_done and not is_new_user
+    days_until_checkin = max(0, 30 - days_since)
+    
+    # Si la diferencia es de 30 días o más, needed es True
+    needed = days_since >= 30
+
+    # Ver si hay actualizaciones del Nutricionista
+    from app.models.nutricion import PlanNutricional
+    nutri_updates_pending = False
+    last_update_date = None
+    
+    # 1. Chequeamos si validó la estrategia o dejó nota
+    if current_user.is_strategic_guide_validated or current_user.nutri_weekly_note:
+        nutri_updates_pending = True
+    
+    # 2. Buscamos la fecha de la última validación de un plan nutricional
+    latest_plan = db.query(PlanNutricional).filter(
+        PlanNutricional.client_id == current_user.id,
+        PlanNutricional.status == "validado"
+    ).order_by(PlanNutricional.validated_at.desc()).first()
+    
+    if latest_plan and latest_plan.validated_at:
+        nutri_updates_pending = True
+        last_update_date = latest_plan.validated_at.strftime("%d/%m/%Y")
 
     return {
         "needed": needed,
         "precision_score": precision,
         "days_since_update": days_since,
+        "days_until_checkin": days_until_checkin,
+        "nutri_updates_pending": nutri_updates_pending,
+        "last_update_date": last_update_date,
         "first_of_month": first_of_month.strftime("%Y-%m-%d"),
         "message": "¡Calibración mensual pendiente!" if needed else ("¡Perfil al día!" if is_new_user else "Plan calibrado este mes")
     }

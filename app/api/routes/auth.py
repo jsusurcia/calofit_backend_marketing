@@ -5,11 +5,10 @@ from app.core.database import get_db
 from app.models.user import User
 from app.core.security import security
 from datetime import timedelta, datetime
-from app.schemas.user import UserLogin, ResetPassword, ForgotPassword, SyncPasswordRequest
+from app.schemas.user import UserLogin, SyncPasswordRequest, ForgotPasswordRequest, ValidateResetCodeRequest
 from app.core.config import settings
 from jose import JWTError, jwt
 from app.models.client import Client
-import secrets
 
 router = APIRouter()
 
@@ -212,74 +211,6 @@ async def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = D
 
 
 
-
-@router.post("/forgot-password")
-async def forgot_password(request: ForgotPassword, db: Session = Depends(get_db)):
-    """
-    Endpoint para solicitar reset de contraseña.
-    Genera un código temporal y lo guarda en caché/memoria.
-    
-    En una app de producción, aquí se enviaría un email con el enlace de reset.
-    
-    Parámetro:
-    - email: Email del usuario
-    """
-    print(f"🔑 Solicitud de reset para: {request.email}")
-    
-    # Buscar usuario en Clientes
-    client = db.query(Client).filter(Client.email == request.email).first()
-    user = client
-    user_type = "client"
-    
-    # Si no es cliente, buscar en Staff
-    if not client:
-        user = db.query(User).filter(User.email == request.email).first()
-        user_type = "staff"
-    
-    # No revelar si el email existe o no (seguridad)
-    if not user:
-        print(f"⚠️ Email no encontrado: {request.email}")
-        return {
-            "message": "Si el email existe en nuestro sistema, recibirás instrucciones de recuperación"
-        }
-    
-    # Generar código seguro (32 caracteres hexadecimales)
-    reset_code = secrets.token_hex(16)
-    reset_expiry = datetime.utcnow() + timedelta(minutes=15)
-    
-    print(f"✅ Código de reset generado para: {user.email} (expira en 15 min)")
-    
-    # En producción, aquí enviarías un email con el código/enlace
-    # Por ahora, retornamos el código para testing (SOLO EN DESARROLLO)
-    if settings.DEBUG:
-        return {
-            "message": "Código de reset enviado",
-            "reset_code": reset_code,  # Solo para testing
-            "user_type": user_type,
-            "expires_in_minutes": 15
-        }
-    else:
-        return {
-            "message": "Si el email existe en nuestro sistema, recibirás instrucciones de recuperación"
-        }
-
-
-@router.post("/reset-password")
-async def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
-    """
-    Endpoint para cambiar la contraseña usando el código de reset.
-    
-    Se usa después de que el usuario confirma el reset en Firebase.
-    
-    Parámetros:
-    - oobCode: Código de recuperación (no se valida localmente)
-    - new_password: Nueva contraseña
-    """
-    print(f"🔐 Intentando reset de contraseña...")
-    
-    return {
-        "message": "Por favor, usar el endpoint /auth/verify-and-sync-password en su lugar"
-    }
 
 
 @router.post("/sync-firebase-password")
@@ -546,3 +477,90 @@ async def verify_and_sync_password(
             status_code=500,
             detail=f"Error procesando solicitud: {str(e)}"
         )
+
+# ----------------- RECUPERACIÓN DE CONTRASEÑA -----------------
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Paso 1: Solicitar código de recuperación"""
+    from app.models.password_reset import PasswordReset
+    from app.services.email_service import EmailService
+    import random
+    
+    # 1. Buscar en ambas tablas
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        client = db.query(Client).filter(Client.email == request.email).first()
+        if not client:
+            # Por seguridad, retornamos OK aunque no exista para evitar enumeración de correos
+            return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
+            
+    # 2. Generar código de 6 dígitos
+    code = str(random.randint(100000, 999999))
+    
+    # 3. Guardar en base de datos
+    reset_record = PasswordReset(
+        email=request.email,
+        reset_code=code
+    )
+    db.add(reset_record)
+    db.commit()
+    
+    # 4. Enviar correo usando Brevo
+    EmailService.send_password_reset_brevo(request.email, code)
+    
+    return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
+
+@router.post("/verify-reset-code")
+async def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
+    """Paso 2: Validar que el código es correcto (sin consumir el código todavía)"""
+    # Nota: Aquí usamos ValidateResetCodeRequest pero solo leemos email y reset_code 
+    # (podemos mandar un password dummy o el frontend manda los 3 campos).
+    # Como el schema requiere new_password, lo ideal sería que manden "" o crear un schema nuevo.
+    # Pero vamos a leer solo lo necesario.
+    from app.models.password_reset import PasswordReset
+    
+    record = db.query(PasswordReset).filter(
+        PasswordReset.email == request.email,
+        PasswordReset.reset_code == request.reset_code,
+        PasswordReset.is_used == False
+    ).order_by(PasswordReset.created_at.desc()).first()
+    
+    if not record or record.is_expired():
+        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+        
+    return {"success": True, "message": "Código válido"}
+
+@router.post("/reset-password")
+async def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
+    """Paso 3: Cambiar la contraseña y consumir el código"""
+    from app.models.password_reset import PasswordReset
+    
+    # 1. Validar código
+    record = db.query(PasswordReset).filter(
+        PasswordReset.email == request.email,
+        PasswordReset.reset_code == request.reset_code,
+        PasswordReset.is_used == False
+    ).order_by(PasswordReset.created_at.desc()).first()
+    
+    if not record or record.is_expired():
+        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+        
+    # 2. Actualizar clave (buscar en User o Client)
+    user = db.query(User).filter(User.email == request.email).first()
+    if user:
+        user.hashed_password = security.hash_password(request.new_password)
+    else:
+        client = db.query(Client).filter(Client.email == request.email).first()
+        if client:
+            client.hashed_password = security.hash_password(request.new_password)
+        else:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+            
+    # 3. Marcar código como usado
+    record.is_used = True
+    record.used_at = datetime.utcnow()
+    
+    db.commit()
+    
+    return {"success": True, "message": "Contraseña actualizada exitosamente"}

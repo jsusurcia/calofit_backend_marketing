@@ -161,8 +161,7 @@ def procesar_secciones_ejercicio(respuesta_estructurada: Dict[str, Any], perfil:
         nombre_tarjeta = (sec.get("nombre") or "Entrenamiento").strip()
 
         stats_line = (
-            f"Cal: {kcal} kcal | Dur: {dur:.0f} min | MET ~{met} "
-            f"(tu peso {peso:.0f} kg; MET×3.5×kg/200×min)"
+            f"Cal: {kcal} kcal | Dur: {dur:.0f} min | MET ~{met}"
         )
         sec["macros"] = stats_line
         sec["gasto_calorico_estimado"] = stats_line

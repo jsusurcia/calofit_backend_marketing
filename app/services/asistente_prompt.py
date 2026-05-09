@@ -314,36 +314,56 @@ async def enriquecer_prompt_con_bd(
             _MAP   = {
                 "biceps": ["%biceps%", "%bíceps%"], "triceps": ["%triceps%", "%tríceps%"],
                 "pecho": ["%pecho%", "%pector%"], "espalda": ["%espalda%", "%dorsal%"],
-                "pierna": ["%pierna%", "%cuadr%", "%femoral%", "%glute%"],
+                "pierna": ["%pierna%", "%cuadr%", "%femoral%", "%glute%", "%pantorrilla%", "%gemelo%"],
                 "gluteos": ["%glute%", "%glúte%"], "hombro": ["%hombro%", "%delto%"],
                 "core": ["%core%", "%abd%"],
             }
             _KEYS = {
                 "biceps": r"biceps|bíceps", "triceps": r"triceps|tríceps",
                 "pecho": r"pecho|pector", "espalda": r"espalda|dorsal",
-                "pierna": r"pierna|cuadriceps|cuádriceps|femoral",
+                "pierna": r"pierna|cuadriceps|cuádriceps|femoral|pantorrilla|gemelo",
                 "gluteos": r"gluteo|glúteo", "hombro": r"hombros?|deltoid",
                 "core": r"abdomen|abdominal|core",
             }
-            objetivo = next((k for k, p in _KEYS.items() if re.search(p, low)), None)
-            if objetivo:
-                pats = _MAP[objetivo]
+            
+            # 1. Encontrar TODOS los objetivos mencionados
+            objetivos_detectados = [k for k, p in _KEYS.items() if re.search(p, low)]
+            
+            if objetivos_detectados:
+                pats_completos = []
+                for obj in objetivos_detectados:
+                    pats_completos.extend(_MAP[obj])
+                
                 rows = db.execute(
                     _sql(
                         "SELECT id, nombre, musculo_principal, met FROM ejercicios "
-                        "WHERE (" + " OR ".join(f"musculo_principal ILIKE :p{i}" for i in range(len(pats))) + ") "
-                        "ORDER BY met DESC NULLS LAST, nombre ASC LIMIT 12"
+                        "WHERE (" + " OR ".join(f"musculo_principal ILIKE :p{i}" for i in range(len(pats_completos))) + ") "
+                        "ORDER BY met DESC NULLS LAST, nombre ASC LIMIT 15"
                     ),
-                    {f"p{i}": pats[i] for i in range(len(pats))},
+                    {f"p{i}": pats_completos[i] for i in range(len(pats_completos))},
                 ).fetchall()
+                
                 if rows:
-                    listado = "\n".join(f"- {r[1]} (id={r[0]}, musculo={r[2]}, MET={r[3]})" for r in rows)
-                    prompt_final += (
-                        f"\n\nEJERCICIOS EN TU BD (usa solo estos si encajan):\n"
-                        f"Objetivo: {objetivo}\n{listado}\n"
+                    listado = "\n".join(
+                        f"- {r[1]} (id={r[0]}, musculo={r[2]}, MET={r[3]})" 
+                        for r in rows
                     )
-        except Exception:
-            pass
+                    prompt_final += (
+                        f"\n\n🏋️ EJERCICIOS EN TU BASE DE DATOS (CATÁLOGO OFICIAL) 🏋️\n"
+                        f"Objetivos detectados: {', '.join(objetivos_detectados)}\n"
+                        f"Catálogo Oficial:\n{listado}\n\n"
+                        f"INSTRUCCIÓN PARA ENTRENAMIENTO (HÍBRIDO DB + LLM):\n"
+                        f"1. Tienes total libertad para diseñar la mejor rutina posible usando tu conocimiento experto.\n"
+                        f"2. PRIORIZA los ejercicios listados arriba si encajan bien con el objetivo.\n"
+                        f"3. Si conoces ejercicios mejores que NO están en esta lista, "
+                        f"TIENES PERMISO para incluirlos e inventar las instrucciones técnicas necesarias.\n"
+                        f"4. NUNCA escribas los códigos `id=...`, `musculo=...` ni `MET=...` en tu respuesta al usuario. Usa SOLO el nombre del ejercicio limpio.\n"
+                        f"5. Asume que el usuario entrena en un GIMNASIO equipado. PRIORIZA el uso de pesas, barras, mancuernas y máquinas. EVITA ejercicios al aire libre como 'subir cerros' o 'trotar en el parque'.\n"
+                        f"6. SIEMPRE cruza tu rutina con las CONDICIONES médicas del usuario. "
+                        f"Descarta CUALQUIER ejercicio (del catálogo o inventado por ti) que le haría daño.\n"
+                    )
+        except Exception as e:
+            print(f"Error extrayendo ejercicios: {e}")
 
     # DB-hint para platos mencionados en el mensaje
     if modo_funcion in ("recomendar_nutricion", "responder_consulta", "otro"):
