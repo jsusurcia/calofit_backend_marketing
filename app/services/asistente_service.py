@@ -230,6 +230,52 @@ class AsistenteService:
             raise ValueError("Perfil de cliente no encontrado")
         return await registro_comida_handler.registrar_manual(body, perfil, db)
 
+    async def calcular_ejercicio_manual(self, texto: str, db: Session, current_user):
+        perfil = db.query(Client).filter(Client.email == current_user.email).first()
+        if not perfil:
+            raise ValueError("Perfil no encontrado")
+        peso_kg = float(getattr(perfil, "weight", None) or 70.0)
+        
+        extraccion = registro_ejercicio_handler._extraer_ejercicio_nlp(texto, texto.lower(), peso_kg, self.ia)
+        if not extraccion or not extraccion.get("es_ejercicio"):
+            return {"ejercicio": None}
+            
+        nombre = extraccion["ejercicios_detectados"][0]
+        if " (" in nombre:
+            nombre = nombre.split(" (")[0]
+            
+        return {
+            "ejercicio": {
+                "nombre": nombre,
+                "duracion": extraccion.get("duracion_min", 15),
+                "calorias": extraccion.get("calorias", 0.0),
+                "met": extraccion.get("met", 5.0)
+            }
+        }
+
+    async def registrar_rutina_manual(self, ejercicios: list, db: Session, current_user):
+        perfil = db.query(Client).filter(Client.email == current_user.email).first()
+        if not perfil:
+            raise ValueError("Perfil no encontrado")
+            
+        for ex in ejercicios:
+            dur_str = str(ex.get('duration', '15')).replace(' min', '')
+            dur_min = float(dur_str) if dur_str.replace('.', '', 1).isdigit() else 15.0
+            kcal = float(ex.get('kcal', 0.0))
+            
+            registro_ejercicio_handler._registrar_workout_log_completo(
+                client_id=perfil.id,
+                ejercicio=ex.get('name', 'Ejercicio'),
+                series=1, reps=1, peso_kg=None,
+                calorias_quemadas=kcal,
+                session_duration_min=dur_min,
+                met=float(ex.get('met', 5.0)),
+                db=db
+            )
+            registro_ejercicio_handler._sumar_calorias_progreso(perfil.id, kcal, db)
+            
+        return {"success": True, "mensaje": "Rutina registrada correctamente"}
+
     # ── 3. Confirmar desde card ───────────────────────────────────────────────
 
     async def confirmar_registro(self, consulta_id: str, db: Session, current_user):

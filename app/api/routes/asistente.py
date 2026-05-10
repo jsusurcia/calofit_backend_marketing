@@ -43,6 +43,14 @@ class RegistroManualAlimentoRequest(BaseModel):
     gramos_por_unidad: float | None = None  # si unidad existe, cuantos gramos equivale 1 unidad
 
 
+class CalcularEjercicioRequest(BaseModel):
+    texto: str
+
+
+class RegistroRutinaManualRequest(BaseModel):
+    ejercicios: list
+
+
 class ConfirmarRegistroRequest(BaseModel):
     consulta_id: str
 
@@ -133,6 +141,46 @@ async def registro_manual_alimento(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         print(f"ERROR EN /log-manual: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/calcular-ejercicio")
+async def calcular_ejercicio(
+    body: CalcularEjercicioRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return await asistente_service.calcular_ejercicio_manual(
+            texto=body.texto,
+            db=db,
+            current_user=current_user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"ERROR EN /calcular-ejercicio: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/log-rutina-manual")
+async def log_rutina_manual(
+    body: RegistroRutinaManualRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return await asistente_service.registrar_rutina_manual(
+            ejercicios=body.ejercicios,
+            db=db,
+            current_user=current_user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"ERROR EN /log-rutina-manual: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
