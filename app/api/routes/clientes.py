@@ -363,14 +363,59 @@ def actualizar_perfil_cliente(
             setattr(cliente, field, value)
             print(f"✅ {field}: {old_value} → {value}")
     
+    # Fields that invalidate the current daily plan macros when changed
+    _PLAN_TRIGGER_FIELDS = {"activity_level", "goal"}
+
     try:
         db.commit()
         db.refresh(cliente)
         print(f"✅ Perfil actualizado para cliente ID {cliente.id}")
-        
+
+        # ── Recalculate plan macros if relevant fields changed ────────────────
+        plan_recalculado = False
+        if _PLAN_TRIGGER_FIELDS & set(update_data.keys()):
+            try:
+                from app.models.nutricion import PlanNutricional, PlanDiario
+
+                edad = 30
+                if cliente.birth_date:
+                    hoy = date.today()
+                    edad = hoy.year - cliente.birth_date.year - (
+                        (hoy.month, hoy.day) < (cliente.birth_date.month, cliente.birth_date.day)
+                    )
+
+                rec = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
+                    peso=float(cliente.weight or 70),
+                    altura=float(cliente.height or 170),
+                    edad=edad,
+                    genero=cliente.gender or "M",
+                    nivel_actividad=cliente.activity_level or "Moderado",
+                    objetivo=cliente.goal or "Mantener peso",
+                )
+
+                plan_activo = (
+                    db.query(PlanNutricional)
+                    .filter(PlanNutricional.client_id == cliente.id)
+                    .order_by(PlanNutricional.fecha_creacion.desc())
+                    .first()
+                )
+                if plan_activo:
+                    for pd in db.query(PlanDiario).filter(PlanDiario.plan_id == plan_activo.id).all():
+                        pd.calorias_dia = round(rec.calorias_diarias)
+                        pd.proteinas_g = rec.proteinas_g
+                        pd.carbohidratos_g = rec.carbohidratos_g
+                        pd.grasas_g = rec.grasas_g
+                    db.commit()
+                    plan_recalculado = True
+                    print(f"✅ Plan recalculado: {round(rec.calorias_diarias)} kcal ({cliente.activity_level}, {cliente.goal})")
+            except Exception as _e:
+                print(f"⚠️ Recalculo de plan falló (no crítico): {_e}")
+        # ─────────────────────────────────────────────────────────────────────
+
         return {
             "message": "Perfil actualizado exitosamente",
-            "cliente": cliente
+            "cliente": cliente,
+            "plan_recalculado": plan_recalculado,
         }
     except IntegrityError as e:
         db.rollback()

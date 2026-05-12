@@ -7,7 +7,7 @@ from app.models.user import User
 from app.api.routes.auth import get_current_user
 from app.services.ia_service import ia_service
 from app.models.nutricion import PlanNutricional, PlanDiario
-from app.models.historial import AlertaSalud, HistorialPeso
+from app.models.historial import AlertaSalud
 from app.schemas.nutricion import PlanNutricionalResponse, PlanNutricionalUpdate
 from app.schemas.client import StrategicGuideUpdate
 from datetime import datetime, timedelta
@@ -207,40 +207,16 @@ def get_assigned_patients(
 
 def _calcular_mes_status(c: Client, db: Session) -> str:
     """
-    Determina el estado del mes del paciente:
+    Determina el estado del plan del paciente:
     - 'validado': Último plan aprobado por nutricionista.
-    - 'pendiente': Existe plan, aún sin validación.
-    - 'falta_checkin': No hay check-in mensual y tampoco plan activo.
-
-    Nota de flujo:
-    El check-in es mensual, pero la revisión por nutricionista puede ser semanal/quincenal.
-    Por eso la validación del plan no se bloquea por falta de check-in.
+    - 'pendiente': Sin plan o plan sin validar.
     """
-    from app.core.utils import get_peru_now
-    now = get_peru_now()
-    first_of_month = now.replace(day=1).date()
-    hizo_checkin = any(r.fecha_registro >= first_of_month for r in c.historial_peso)
-
-    # 1) El estado principal depende del ciclo de plan, no del check-in.
     ultimo_plan = db.query(PlanNutricional).filter(
         PlanNutricional.client_id == c.id
     ).order_by(PlanNutricional.fecha_creacion.desc()).first()
 
     if ultimo_plan and ultimo_plan.status == "validado":
         return "validado"
-
-    if ultimo_plan:
-        return "pendiente"
-
-    # 2) Si el perfil ya está completo, debe entrar al flujo operativo de Nutri:
-    #    aparecer como pendiente de validación aunque el check-in mensual no exista.
-    if c.is_profile_complete:
-        return "pendiente"
-
-    # 3) Si aún no hay plan ni perfil completo, usamos check-in mensual como estado inicial.
-    if not hizo_checkin:
-        return "falta_checkin"
-
     return "pendiente"
 
 @router.get("/cliente/{id}/progreso")
@@ -263,6 +239,23 @@ def get_patient_progress(
     # Obtener historial de peso, imc y progreso calórico
     historial_peso = [{"fecha": h.fecha_registro, "valor": h.peso_kg} for h in client.historial_peso]
     historial_imc = [{"fecha": h.fecha_registro, "valor": h.imc} for h in client.historial_imc]
+
+    # ── Resumen del día actual (lo que ve el nutricionista en "RESUMEN ENERGÉTICO HOY") ──
+    from app.models.historial import ProgresoCalorias
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
+    progreso_hoy = db.query(ProgresoCalorias).filter(
+        ProgresoCalorias.client_id == id,
+        ProgresoCalorias.fecha == hoy,
+    ).first()
+    today_summary = {
+        "calorias_consumidas": int(progreso_hoy.calorias_consumidas or 0) if progreso_hoy else 0,
+        "calorias_quemadas":   int(progreso_hoy.calorias_quemadas   or 0) if progreso_hoy else 0,
+        "proteinas":           round(float(progreso_hoy.proteinas_consumidas     or 0), 1) if progreso_hoy else 0.0,
+        "carbos":              round(float(progreso_hoy.carbohidratos_consumidos or 0), 1) if progreso_hoy else 0.0,
+        "grasas":              round(float(progreso_hoy.grasas_consumidas        or 0), 1) if progreso_hoy else 0.0,
+    }
+    # ─────────────────────────────────────────────────────────────────────────────────────
     
     # Obtener alertas de salud (v80.0)
     alertas = [{
@@ -278,17 +271,23 @@ def get_patient_progress(
     # Proporcionamos la misma base que ve el cliente en su dashboard
     tmb_estimada = calcular_metabolismo_basal(client)
     
-    # Calorias ajustadas según objetivo
-    calorias_ajustadas = tmb_estimada
-    if client.goal == "Perder peso":
-        calorias_ajustadas *= 0.85
-    elif client.goal == "Ganar masa":
-        calorias_ajustadas *= 1.1
+    # Calorias ajustadas según objetivo (cubre todos los valores del dropdown)
+    _GOAL_FACTOR = {
+        "perder peso": 0.85, "perder_leve": 0.90,
+        "ganar masa": 1.10, "ganar_leve": 1.05,
+        "mantener peso": 1.0,
+    }
+    goal_key = (client.goal or "mantener peso").lower().strip()
+    calorias_ajustadas = tmb_estimada * _GOAL_FACTOR.get(goal_key, 1.0)
 
     peso_cliente = float(client.weight or 70.0)
     recomendacion_ia = obtener_macros_desglosados(
         calorias_ajustadas, client.goal, peso_cliente
     )
+
+    ultimo_plan_prog = db.query(PlanNutricional).filter(
+        PlanNutricional.client_id == id
+    ).order_by(PlanNutricional.fecha_creacion.desc()).first()
 
     return {
         "id": client.id,
@@ -296,6 +295,7 @@ def get_patient_progress(
         "objetivo": client.goal,
         "focus_objetivo": client.ai_strategic_focus, # Renamed from client.focus_objetivo to client.ai_strategic_focus
         "semana_status": _calcular_mes_status(client, db),
+        "plan_validated_at": str(ultimo_plan_prog.validated_at) if ultimo_plan_prog and ultimo_plan_prog.validated_at else None,
         "historial_peso": historial_peso,
         "historial_imc": historial_imc,
         "alertas_salud": alertas,
@@ -319,6 +319,7 @@ def get_patient_progress(
         "medical_conditions": client.medical_conditions,
         "coach_notes": client.coach_notes,
         "nutri_weekly_note": client.nutri_weekly_note,
+        "today_summary": today_summary,
     }
 
 @router.get("/cliente/{id}/sugerir-estrategia")
@@ -399,8 +400,25 @@ def update_strategic_guide(
         client.forbidden_foods = guide.forbidden_foods
     if guide.medical_conditions is not None:
         client.medical_conditions = guide.medical_conditions
-    if guide.nutri_weekly_note is not None:          # 🆕 Mensaje semanal del nutri
+    if guide.nutri_weekly_note is not None:
         client.nutri_weekly_note = guide.nutri_weekly_note
+    if guide.workout_type is not None:
+        client.workout_type = guide.workout_type
+    if guide.session_duration is not None:
+        client.session_duration = guide.session_duration
+
+    # Actualizar validated_at del plan activo para que el badge del cliente muestre fecha
+    plan_activo = (
+        db.query(PlanNutricional)
+        .filter(PlanNutricional.client_id == id)
+        .order_by(PlanNutricional.fecha_creacion.desc())
+        .first()
+    )
+    if plan_activo:
+        plan_activo.validated_at = datetime.utcnow()
+        plan_activo.validated_by_id = current_user.id
+        if plan_activo.status != "validado":
+            plan_activo.status = "validado"
 
     db.commit()
     return {"status": "success", "message": "Guía estratégica actualizada para la IA"}

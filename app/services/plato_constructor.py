@@ -451,6 +451,14 @@ _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     # "lisa" como token completo → pez, no adjetivo.
     # Se verifica con word-level token en _validar_consistencia_final().
     (("vacuno",),                        ("vacuno", "res", "carne", "lomo")),
+    # ── Bases carbohidrato ───────────────────────────────────────────────────
+    # Evita que "Tostada de ARROZ integral" tenga solo pan (bug plato 304).
+    # Si el nombre dice "arroz", al menos un ingrediente debe contener "arroz".
+    (("arroz",),                         ("arroz",)),
+    (("quinua",),                        ("quinua",)),
+    (("avena",),                         ("avena",)),
+    (("lentejas", "lenteja"),            ("lenteja", "lentejas")),
+    (("garbanzo",),                      ("garbanzo",)),
 ]
 
 
@@ -678,11 +686,27 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
 #
 # Palabras ignoradas (conectores, adjetivos, preparaciones):
 _PALABRAS_IGNORADAS_NOMBRE = frozenset({
+    # conectores y artículos
     "con", "sin", "del", "los", "las", "una", "unos", "unas",
+    # descriptores de preparación (no son ingredientes)
     "horno", "plancha", "parrilla", "vapor", "frito", "cocido", "asado",
     "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
     "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
     "salsa", "estofado", "guiso", "sudado", "saltado",
+    # tipos de plato — no son ingredientes en sí mismos
+    "ensalada", "tostada", "tortilla", "sandwich", "sandwi",
+    "ceviche", "cebiche", "tiradito", "causa", "crema", "sopa",
+    "batido", "licuado", "smoothi",
+    # categorías genéricas — los ingredientes concretos son los que importan
+    "verduras", "frutas", "fruta",
+    # sinónimos comunes de ingredientes registrados con otro nombre en BD
+    "aguacate",     # → Palta
+    # pasta/fideos: el ingrediente en BD se llama "pasta cocida", no "tallarines"
+    "tallarines", "fideos", "espagueti", "fettuccine",
+    # descriptores adicionales de cantidad/método
+    "porcion", "porcion", "controlada", "rellena", "relleno",
+    # términos regionales que no mapean a ingredientes individuales
+    "canchita", "serrana", "serrano",
 })
 
 
@@ -726,8 +750,10 @@ def _validar_ingredientes_en_nombre(
         if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)
     ]
 
-    # Umbral: si más del 50% de tokens significativos del nombre no están en ings → rechazar
-    if len(ausentes) > len(tokens_nombre) * 0.5:
+    # Umbral: si ≥40% de tokens significativos del nombre no están en ings → rechazar.
+    # 0.4 en lugar de 0.5: cierra el gap donde exactamente 50% ausentes pasaba el guard
+    # (ej: "batido leche almendras frutas" con "almendras" y "batido" ausentes = 50%).
+    if len(ausentes) >= len(tokens_nombre) * 0.4:
         return False, (
             f"ingrediente(s) del nombre sin correspondencia en resueltos: "
             f"{ausentes[:3]} — ings disponibles: "
@@ -1123,9 +1149,14 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
             f"    PROHIBIDO en tostadas: leche (líquida o en polvo), leche evaporada, arroz, pasta.\n"
             f"    Ejemplo CORRECTO: Tostada con Queso = [pan integral 70g, queso fresco 30g]\n"
             f"    Ejemplo INCORRECTO: Tostada con Leche en Polvo = [pan, leche en polvo] ← NUNCA\n"
-            f"  * BATIDO / LICUADO / SMOOTHIE: es una bebida. Ingredientes = frutas + lácteo.\n"
+            f"  * BATIDO / LICUADO / SMOOTHIE: es una bebida. Ingredientes = frutas + base líquida.\n"
             f"    PROHIBIDO en batidos: pan, arroz, pasta, papa, fideos.\n"
-            f"    Ejemplo: Batido de Plátano = [plátano 120g, leche fresca 200g]\n"
+            f"    REGLA CRÍTICA: Si el nombre especifica el tipo de leche o líquido, úsalo EXACTAMENTE.\n"
+            f"    Ejemplos: 'leche de almendras' → 'Leche de Almendras' (NO 'Leche Fresca');\n"
+            f"    'leche de avena' → 'Leche de Avena'; 'leche de coco' → 'Leche de Coco';\n"
+            f"    'bebida de soya' → 'Bebida De Soya'. NUNCA sustituir por leche animal.\n"
+            f"    'leche de vaca' / 'leche entera' / 'leche fresca' → 'Leche Fresca Entera' (líquida, NUNCA en polvo).\n"
+            f"    Ejemplo genérico: Batido de Plátano = [plátano 120g, leche fresca entera 200g]\n"
             f"  * ENSALADA: ingredientes frescos/crudos. PROHIBIDO: ingredientes sancochados pesados\n"
             f"    como papa, yuca, camote (a menos que el nombre lo especifique).\n"
             f"- Total gramos: 400-750 para platos completos; 150-200 para cebiche/tiradito; 100-300 para snacks/batidos\n"
@@ -1367,6 +1398,28 @@ def _loguear_resultado_nutricional(
         logger.error("[ResultadoNutricional] Error: %s", e)
 
 
+# ─── Sanitizador de nombres LLM ──────────────────────────────────────────────
+# El LLM a veces devuelve "nombre_es" con porciones incrustadas:
+#   "2 rebanadas  pan integral" → "pan integral"
+#   "15g  miel"                → "miel"
+#   "1 taza de avena"          → "avena"
+# Esos nombres causan creación de alimentos con nombres raros (IDs 790/792/793/809).
+_RE_PORCION_PREFIJA = re.compile(
+    r"^\d+[\.,]?\d*\s*"
+    r"(cucharaditas|cucharadita|cucharadas|cucharada|rebanadas|rebanada|"
+    r"unidades|unidad|pizcas|pizca|ramitos|ramito|dientes|diente|"
+    r"hojas|hoja|rodajas|rodaja|trozos|trozo|porciones|porcion|"
+    r"vasos|vaso|tazas|taza|kg|gr|ml|g|l)?\s*(de\s+)?",
+    re.IGNORECASE,
+)
+
+
+def _limpiar_nombre_ingrediente(nombre_es: str) -> str:
+    """Elimina porciones/unidades del inicio del nombre_es generado por LLM."""
+    limpio = _RE_PORCION_PREFIJA.sub("", (nombre_es or "").strip()).strip()
+    return limpio if limpio else nombre_es
+
+
 # ─── Constructor principal ───────────────────────────────────────────────────
 
 async def crear_plato_dinamico(
@@ -1442,7 +1495,7 @@ async def crear_plato_dinamico(
 
     resueltos: list[tuple] = []  # [(Alimento, gramos)]
     for item in ingredientes_raw:
-        nombre_ing_es = item["nombre_es"]
+        nombre_ing_es = _limpiar_nombre_ingrediente(item["nombre_es"])
         gramos = item["gramos"]
         nombre_ing_norm = _norm(nombre_ing_es)
         alim = await _buscar_o_crear_alimento_async(db, nombre_ing_norm, nombre_ing_es)

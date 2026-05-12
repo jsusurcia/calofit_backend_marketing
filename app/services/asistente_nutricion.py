@@ -230,15 +230,37 @@ def _resolver_alimento_en_bd(db: Session, nombre_norm: str):
     alias = db.query(AlimentoAlias).filter(AlimentoAlias.alias == nombre_norm).first()
     if alias:
         return db.query(Alimento).filter(Alimento.id == alias.alimento_id).first()
-    # Contains (palabras significativas, sin stopwords)
+    # Contains — prefiere el candidato con mayor similitud al nombre buscado
     words = [w for w in nombre_norm.split() if len(w) >= 5 and w not in _ING_STOPWORDS]
     for w in words:
-        a = db.query(Alimento).filter(Alimento.nombre_normalizado.like(f"%{w}%")).first()
-        if a:
-            return a
-        alias = db.query(AlimentoAlias).filter(AlimentoAlias.alias.like(f"%{w}%")).first()
-        if alias:
-            return db.query(Alimento).filter(Alimento.id == alias.alimento_id).first()
+        candidates = (
+            db.query(Alimento)
+            .filter(Alimento.nombre_normalizado.like(f"%{w}%"))
+            .limit(15)
+            .all()
+        )
+        if candidates:
+            best = max(
+                candidates,
+                key=lambda c: difflib.SequenceMatcher(
+                    None, nombre_norm, c.nombre_normalizado or ""
+                ).ratio(),
+            )
+            return best
+        alias_candidates = (
+            db.query(AlimentoAlias)
+            .filter(AlimentoAlias.alias_normalizado.like(f"%{w}%"))
+            .limit(10)
+            .all()
+        )
+        if alias_candidates:
+            best_alias = max(
+                alias_candidates,
+                key=lambda al: difflib.SequenceMatcher(
+                    None, nombre_norm, al.alias_normalizado or ""
+                ).ratio(),
+            )
+            return db.query(Alimento).filter(Alimento.id == best_alias.alimento_id).first()
     return None
 
 
@@ -333,7 +355,7 @@ def _buscar_colision_local(
         ).ratio()
         if score > best_score:
             best_score, best = score, c
-    if best and best_score >= 0.70:
+    if best and best_score >= 0.75:
         return (best, best_score)
     return None
 

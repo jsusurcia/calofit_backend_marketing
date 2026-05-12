@@ -344,6 +344,14 @@ def _expandir_compuestos_con(items: List[str], db: Session) -> List[str]:
         if " con " not in item:
             resultado.append(item)
             continue
+        # No segmentar si el nombre completo ya existe como plato propio en BD
+        norm_full = _norm_plato(item)
+        if db.execute(
+            _sql_t("SELECT 1 FROM platos WHERE nombre_normalizado = :n LIMIT 1"),
+            {"n": norm_full},
+        ).fetchone():
+            resultado.append(item)
+            continue
         last_con = item.rfind(" con ")
         if last_con <= 0:
             resultado.append(item)

@@ -33,6 +33,9 @@ from app.models.alimento_alias import AlimentoAlias
 from app.models.alimento_unidad import AlimentoUnidad
 from app.services.asistente_nutricion import coherencia_proteina_platos
 from app.services.nutricional_result import validar_macros_atwater
+from app.core.logging_config import get_logger
+
+logger = get_logger("nlp_food_extractor")
 
 # Si un ítem sale con kcal extremadamente alto, solo advertimos (no bloquea registro).
 # Esto evita registros absurdos por cantidades/unidades mal interpretadas.
@@ -501,18 +504,15 @@ class NLPFoodExtractor:
                 a.calorias_100g, a.proteina_100g, a.carbohidratos_100g, a.grasas_100g
             )
             if not _ok:
-                from app.core.logging_config import get_logger as _gl
-                _gl("nlp_extractor").warning("Alimento '%s' descartado — %s", nombre_es, _motivo)
+                logger.warning("Alimento '%s' descartado — %s", nombre_es, _motivo)
                 return None
             self.db.add(a)
             self.db.flush()   # Fix 2: flush mantiene la transacción del caller intacta
-            from app.core.logging_config import get_logger as _gl
-            _gl("nlp_extractor").info("Nuevo alimento '%s' (fuente=%s)", nombre_es, fuente)
+            logger.info("Nuevo alimento '%s' (fuente=%s)", nombre_es, fuente)
             return a
         except Exception as e:
             self.db.rollback()
-            from app.core.logging_config import get_logger as _gl
-            _gl("nlp_extractor").error("Error guardando '%s': %s", nombre_es, e)
+            logger.error("Error guardando '%s': %s", nombre_es, e)
             return None
 
     # ─── PASO 4b: Fallback Groq cuando BD y USDA fallan ─────────────────────
@@ -730,7 +730,7 @@ class NLPFoodExtractor:
         """
         # GUARD: Detectar negaciones antes de procesar
         if self._es_negacion(mensaje):
-            print(f"[NLPExtractor] Negacion detectada, sin registro: '{mensaje[:50]}'")
+            logger.info("[NLPExtractor] Negacion detectada, sin registro: '%s'", mensaje[:50])
             return None
 
         # PASO 0: Pre-check catálogo platos con mensaje completo (antes de Groq).
@@ -753,6 +753,17 @@ class NLPFoodExtractor:
                         " al almuerzo", " al desayuno", " a la cena"):
                 if _msg_clean.endswith(_sf):
                     _msg_clean = _msg_clean[:-len(_sf)].strip()
+            # ── Extraer cantidad numérica antes del fuzzy ("dos", "tres", etc.) ─────
+            _qty_pre = 1.0
+            _m_qty_pre = re.match(r"(?i)^(dos|tres|cuatro|cinco|2|3|4|5)\s+(.+)$", _msg_clean)
+            if _m_qty_pre:
+                _qty_map_pre = {
+                    "dos": 2.0, "tres": 3.0, "cuatro": 4.0, "cinco": 5.0,
+                    "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                }
+                _qty_pre = _qty_map_pre.get(_m_qty_pre.group(1).lower(), 1.0)
+                _msg_clean = _m_qty_pre.group(2).strip()
+            # ──────────────────────────────────────────────────────────────────────
             _q_pre = _norm(_msg_clean)
             if _q_pre and len(_q_pre) >= 5:
                 try:
@@ -771,7 +782,7 @@ class NLPFoodExtractor:
                         " JOIN alimentos a ON a.id=pi2.alimento_id"
                         " WHERE p.nombre_normalizado=:q GROUP BY p.id,p.nombre LIMIT 1"
                     ), {"q": _q_pre}).fetchone()
-                    # Similarity fallback (≥0.82) if no exact match
+                    # Similarity fallback (≥0.88) if no exact match
                     if not _pre_row:
                         _cands0 = (
                             self.db.query(_Plato0.id, _Plato0.nombre_normalizado)
@@ -787,7 +798,7 @@ class NLPFoodExtractor:
                             if _sc0 > _bsc0:
                                 _bsc0 = _sc0
                                 _bid0 = _pid0
-                        if _bid0 and _bsc0 >= 0.82:
+                        if _bid0 and _bsc0 >= 0.88:
                             _pre_row = self.db.execute(_text0(
                                 "SELECT p.id, p.nombre,"
                                 " SUM(a.calorias_100g*pi2.gramos/100.0),"
@@ -800,35 +811,41 @@ class NLPFoodExtractor:
                                 " WHERE p.id=:pid GROUP BY p.id,p.nombre LIMIT 1"
                             ), {"pid": _bid0}).fetchone()
                             if _pre_row:
-                                print(f"[NLPExtractor] Pre-check similarity {round(_bsc0,2)}: '{_q_pre}' → '{_pre_row[1]}'")
+                                logger.info(
+                                    "[NLPExtractor] Pre-check similarity %.2f: '%s' → '%s'",
+                                    _bsc0, _q_pre, _pre_row[1],
+                                )
                     if _pre_row:
-                        print(f"[NLPExtractor] Pre-check exacto: '{_pre_row[1]}' {round(float(_pre_row[2] or 0),1)} kcal")
                         _kcal0 = round(float(_pre_row[2] or 0), 1)
                         _prot0 = round(float(_pre_row[3] or 0), 1)
                         _carb0 = round(float(_pre_row[4] or 0), 1)
                         _gras0 = round(float(_pre_row[5] or 0), 1)
+                        logger.info(
+                            "[NLPExtractor] Pre-check: '%s' qty=%.0f %.1f kcal",
+                            _pre_row[1], _qty_pre, _kcal0,
+                        )
                         _item0 = ItemExtraido(
                             alimento=str(_pre_row[1]),
-                            cantidad=1.0,
+                            cantidad=_qty_pre,
                             unidad="porcion",
                             gramos_totales=100.0,
-                            calorias=_kcal0,
-                            proteinas_g=_prot0,
-                            carbohidratos_g=_carb0,
-                            grasas_g=_gras0,
+                            calorias=round(_kcal0 * _qty_pre, 1),
+                            proteinas_g=round(_prot0 * _qty_pre, 1),
+                            carbohidratos_g=round(_carb0 * _qty_pre, 1),
+                            grasas_g=round(_gras0 * _qty_pre, 1),
                             origen="bd",
                         )
                         return ResultadoExtraccion(
                             items=[_item0],
                             nombres=[str(_pre_row[1])],
-                            calorias_total=_kcal0,
-                            proteinas_total=_prot0,
-                            carbohidratos_total=_carb0,
-                            grasas_total=_gras0,
+                            calorias_total=round(_kcal0 * _qty_pre, 1),
+                            proteinas_total=round(_prot0 * _qty_pre, 1),
+                            carbohidratos_total=round(_carb0 * _qty_pre, 1),
+                            grasas_total=round(_gras0 * _qty_pre, 1),
                             advertencia=None,
                         )
                 except Exception as _ep:
-                    print(f"[NLPExtractor] Pre-check error: {_ep}")
+                    logger.warning("[NLPExtractor] Pre-check error: %s", _ep)
 
         # PASO 1: Llama-3 extrae JSON
         items_raw = await self._llm_extraer_json(mensaje)
@@ -919,7 +936,10 @@ class NLPFoodExtractor:
                         " WHERE p.id=:pid GROUP BY p.id, p.nombre LIMIT 1"
                     ), {"pid": _best_id}).fetchone()
                     if plato_row:
-                        print(f"[NLPExtractor] Similarity {round(_best_score,2)}: '{q_norm}' → '{plato_row[1]}')")
+                        logger.info(
+                            "[NLPExtractor] Similarity %.2f: '%s' → '%s'",
+                            _best_score, q_norm, plato_row[1],
+                        )
 
             if plato_row:
                 # Columnas: 0=id, 1=nombre, 2=kcal, 3=prot, 4=carb, 5=gras
@@ -928,7 +948,10 @@ class NLPFoodExtractor:
                 proteinas    = float(plato_row[3] or 0)
                 carbos       = float(plato_row[4] or 0)
                 grasas       = float(plato_row[5] or 0)
-                print(f"[NLPExtractor] '{nombre_final}' desde platos+ingredientes: {round(calorias, 1)} kcal")
+                logger.info(
+                    "[NLPExtractor] '%s' desde platos+ingredientes: %.1f kcal",
+                    nombre_final, calorias,
+                )
                 # Aplicar modificadores sobre el plato completo
                 if sin_lista or con_extra_lista:
                     calorias, proteinas, carbos, grasas, notas = self._aplicar_modificadores(
@@ -957,7 +980,7 @@ class NLPFoodExtractor:
                     if resultado_combinado:
                         calorias, proteinas, carbos, grasas, gramos = resultado_combinado
                         nombre_final = nombre.title()
-                        print(f"[NLPExtractor] Plato combinado '{nombre}': {calorias} kcal")
+                        logger.info("[NLPExtractor] Plato combinado '%s': %.1f kcal", nombre, calorias)
                         # Aplicar modificadores
                         if sin_lista or con_extra_lista:
                             calorias, proteinas, carbos, grasas, notas = self._aplicar_modificadores(

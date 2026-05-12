@@ -135,14 +135,31 @@ class RecomendacionesHandler:
         excluir = self._nombres_historial_reciente(perfil.id, db, dias=2)
         excluir += list(getattr(perfil, "forbidden_foods", None) or [])
 
-        return ml_recomendador.obtener_recomendaciones(
+        recommended = list(getattr(perfil, "recommended_foods", None) or [])
+        # Fetch extra candidates so we can surface preferred foods even after shuffle
+        n_fetch = n * 2 if recommended else n
+
+        recs = ml_recomendador.obtener_recomendaciones(
             calorias_faltantes = deficit["calorias"],
             prote_faltante     = deficit["proteinas"],
             carbo_faltante     = deficit["carbos"],
             grasa_faltante     = deficit["grasas"],
-            n_recomendaciones  = n,
+            n_recomendaciones  = n_fetch,
             excluir_nombres    = excluir,
         )
+
+        # Boost foods the nutritionist explicitly recommended → move to front
+        if recommended and len(recs) > n:
+            rec_norm = {r.lower() for r in recommended}
+            preferred = [r for r in recs if any(
+                token in (r.get("alimento") or "").lower() for token in rec_norm
+            )]
+            rest = [r for r in recs if r not in preferred]
+            recs = (preferred + rest)[:n]
+        else:
+            recs = recs[:n]
+
+        return recs
 
     def guardar_recomendacion(
         self,
