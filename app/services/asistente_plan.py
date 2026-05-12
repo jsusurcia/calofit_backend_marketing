@@ -29,20 +29,32 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
     )
 
     if not plan_maestro:
-        from app.services.calculador_dieta import calculador_dieta
+        from app.services.calculador_dieta import CalculadorDietaAutomatica
 
-        _nivel_map = {
-            "Sedentario": 1.2, "Ligero": 1.375, "Moderado": 1.55,
-            "Intenso": 1.725, "Muy intenso": 1.9,
-        }
-        genero     = 1 if getattr(perfil, "gender", "M") == "M" else 2
-        nivel      = _nivel_map.get(getattr(perfil, "activity_level", "Moderado"), 1.55)
-        macros     = calculador_dieta.calcular_macros(
-            genero=genero, edad=edad,
-            peso=float(perfil.weight or 70), talla=float(perfil.height or 170),
+        genero = getattr(perfil, "gender", "M") or "M"
+        nivel = getattr(perfil, "activity_level", "Moderado") or "Moderado"
+        if nivel == "Intenso": nivel = "Activo"
+        elif nivel == "Muy intenso": nivel = "Muy activo"
+        
+        objetivo_raw = getattr(perfil, "goal", "Mantener peso") or "Mantener peso"
+        objetivo = "Mantener peso"
+        if "ganar" in objetivo_raw.lower(): objetivo = "Ganar masa"
+        elif "perder" in objetivo_raw.lower() or "bajar" in objetivo_raw.lower(): objetivo = "Perder peso"
+
+        recomendacion = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
+            peso=float(perfil.weight or 70),
+            altura=float(perfil.height or 170),
+            edad=edad,
+            genero=genero,
             nivel_actividad=nivel,
-            objetivo=getattr(perfil, "goal", "Mantenimiento") or "Mantenimiento",
+            objetivo=objetivo,
         )
+        macros = {
+            "calorias_objetivo": recomendacion.calorias_diarias,
+            "proteinas_g": recomendacion.proteinas_g,
+            "carbohidratos_g": recomendacion.carbohidratos_g,
+            "grasas_g": recomendacion.grasas_g,
+        }
 
         class _PlanFallback:
             def __init__(self, objetivo):

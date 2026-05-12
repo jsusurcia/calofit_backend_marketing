@@ -299,7 +299,7 @@ class AsistenteService:
         db.commit()
         return {
             "success": True,
-            "mensaje": f"Registrado: {meta['nombre']} — {meta['calorias']:.0f} kcal (mismos valores del chat).",
+            "mensaje": f"✅ Registrado: {meta['nombre']} — {meta['calorias']:.0f} kcal",
             "tipo_detectado": meta["tipo_detectado"],
             "balance_actualizado": {
                 "consumido":       progreso.calorias_consumidas,

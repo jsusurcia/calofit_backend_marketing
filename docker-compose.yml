@@ -1,0 +1,59 @@
+# Copia .env.example a .env en la raíz del proyecto y define POSTGRES_PASSWORD (y opcionalmente DATABASE_URL).
+# Valores por defecto mantienen compatibilidad con instalaciones locales existentes.
+
+services:
+  # Base de Datos PostgreSQL
+  db:
+    image: postgres:15
+    container_name: calofit_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leomeflo09}
+      POSTGRES_DB: ${POSTGRES_DB:-BD_Calofit}
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Útil si Postgres reporta "could not resize shared memory" con consultas grandes
+    shm_size: 256mb
+
+  # Tu Backend FastAPI
+  backend:
+    build:
+      context: "./"
+      dockerfile: Dockerfile
+    container_name: calofit_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-leomeflo09}@db:5432/${POSTGRES_DB:-BD_Calofit}
+    volumes:
+      - ./:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend Flutter Web
+  frontend:
+    build:
+      context: ../calofit_frontend_marketing
+      dockerfile: Dockerfile
+    container_name: calofit_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

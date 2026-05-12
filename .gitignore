@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 secrets.json
+.venv/
 
 # 🔥 FIREBASE
 *firebase-adminsdk*.json

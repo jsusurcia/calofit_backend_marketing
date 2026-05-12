@@ -1988,8 +1988,9 @@ async def procesar_secciones_comida(
     # Después de db.commit() / db.rollback() SQLAlchemy expira el objeto
     # y cada acceso a .id dispararía un SELECT; si la transacción está
     # abortada ese SELECT falla con InFailedSqlTransaction.
-    _perfil_id   = perfil.id
-    _perfil_goal = getattr(perfil, "goal", None)
+    _perfil_id           = perfil.id
+    _perfil_goal         = getattr(perfil, "goal", None)
+    _forbidden_foods_raw = list(getattr(perfil, "forbidden_foods", None) or [])
 
     _platos_del_mensaje = _extraer_platos_del_mensaje(mensaje_original or "")
 
@@ -2616,6 +2617,38 @@ async def procesar_secciones_comida(
             "[filtro_kcal] %d sección(es) eliminada(s): %s",
             len(_secciones_rechazadas_log), _secciones_rechazadas_log,
         )
+
+    # ── Filtro post-LLM: alimentos prohibidos por el nutricionista ───────────
+    _forbidden_norms = [_norm(f) for f in _forbidden_foods_raw if f]
+    if _forbidden_norms:
+        _secs_prohibidas: List[str] = []
+        for _sec in respuesta_estructurada.get("secciones", []):
+            if _sec.get("tipo") != "comida" or _sec.get("_rechazar"):
+                continue
+            _texto_sec = _norm(str(_sec.get("nombre") or "")) + " " + " ".join(
+                _norm(str(i)) for i in (_sec.get("ingredientes") or [])
+            )
+            _match = next((f for f in _forbidden_norms if f and f in _texto_sec), None)
+            if _match:
+                _sec["_rechazar"] = True
+                _secs_prohibidas.append(str(_sec.get("nombre") or "?"))
+        if _secs_prohibidas:
+            respuesta_estructurada["secciones"] = [
+                s for s in respuesta_estructurada.get("secciones", [])
+                if not s.get("_rechazar")
+            ]
+            _nota_prohib = (
+                f"\n\n⚠️ He omitido {len(_secs_prohibidas)} opción(es) "
+                f"({', '.join(_secs_prohibidas)}) porque contienen alimentos que "
+                "tu nutricionista ha indicado evitar."
+            )
+            respuesta_estructurada["texto_conversacional"] = (
+                (respuesta_estructurada.get("texto_conversacional") or "") + _nota_prohib
+            ).strip()
+            logger.info(
+                "[forbidden_foods] %d sección(es) eliminadas: %s",
+                len(_secs_prohibidas), _secs_prohibidas,
+            )
 
     # ── VALIDACIÓN GLOBAL POR COMIDA (capa de segunda defensa) ───────────────
     # No aplicar si es recomendación, ya que las secciones son opciones excluyentes.

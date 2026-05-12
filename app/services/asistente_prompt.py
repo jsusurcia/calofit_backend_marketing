@@ -173,7 +173,8 @@ def construir_prompt_cliente(
         })
         bloque_perfil_ml = (
             f"\n\nPERFIL ML ({perfil_ml}, {conf_ml}% confianza): "
-            f"{ml_perfil.get_tono_asistente(perfil_ml)}"
+            f"{ml_perfil.get_tono_asistente(perfil_ml)} "
+            f"OBLIGATORIO: menciona el nivel del usuario ({perfil_ml}) al dar recomendaciones personalizadas."
         )
     except Exception:
         pass
@@ -209,6 +210,19 @@ def construir_prompt_cliente(
             d_prot = max(0, prot_meta - prot_meta * pct_c) * escala
             d_carb = max(0, carbo_meta - carbo_meta * pct_c) * escala
             d_gras = max(0, grasa_meta - grasa_meta * pct_c) * escala
+
+            # Déficit diario completo para justificar recomendaciones al usuario
+            _prot_falt = round(max(0, prot_meta - prot_meta * pct_c), 1)
+            _carb_falt = round(max(0, carbo_meta - carbo_meta * pct_c), 1)
+            _gras_falt = round(max(0, grasa_meta - grasa_meta * pct_c), 1)
+            _prot_pct  = round((_prot_falt / prot_meta * 100) if prot_meta > 0 else 0)
+            _carb_pct  = round((_carb_falt / carbo_meta * 100) if carbo_meta > 0 else 0)
+            _gras_pct  = round((_gras_falt / grasa_meta * 100) if grasa_meta > 0 else 0)
+            _deficit_txt = (
+                f"Proteína: {_prot_falt}g ({_prot_pct}% meta diaria), "
+                f"Carbohidratos: {_carb_falt}g ({_carb_pct}% meta diaria), "
+                f"Grasas: {_gras_falt}g ({_gras_pct}% meta diaria)"
+            )
 
             msg_low = mensaje_fuzzy.lower() if mensaje_fuzzy else ""
             
@@ -249,7 +263,10 @@ def construir_prompt_cliente(
                         f"   Ingredientes exactos: {ings}\n"
                     )
                 bloque_reco_ml = (
-                    f"\n\nSUGERENCIAS DE PLATOS CONFIABLES (OBLIGATORIO SUGERIR ESTOS):\n{lista_platos}"
+                    f"\n\nDÉFICIT DE MACROS HOY: {_deficit_txt}\n"
+                    f"SUGERENCIAS DE PLATOS CONFIABLES (OBLIGATORIO SUGERIR ESTOS):\n{lista_platos}"
+                    "OBLIGATORIO: Al presentar cada plato, justifica explícitamente usando el déficit. "
+                    "Ejemplo: 'Te recomiendo [plato] porque hoy te faltan [X]g de proteína ([Y]% de tu meta diaria).' "
                     "Debes sugerir EXACTAMENTE estos platos en tu respuesta. "
                     "Usa los nombres provistos como títulos de las opciones, respeta sus macros, y copia "
                     "los ingredientes exactos proporcionados. "
@@ -456,8 +473,9 @@ def clasificar_intencion_respuesta(respuesta_estructurada: dict, mensaje: str) -
 
 
 def limpiar_tags_calofit(respuesta_estructurada: dict) -> None:
-    """Elimina residuos de tags CALOFIT del texto y secciones."""
+    """Elimina residuos de tags CALOFIT y etiquetas genéricas del texto y secciones."""
     _re = re.compile(r'\[/?CALOFIT_[A-Z_:]*.*?\]', re.IGNORECASE)
+    _re_gen = re.compile(r'(?i)^(sugerencia|opci[oó]n)\s*\d+[:\-]?\s*')
     texto = respuesta_estructurada.get("texto_conversacional", "")
     respuesta_estructurada["texto_conversacional"] = sanear_texto_conversacional_recipe(
         _re.sub("", texto).strip()
@@ -465,7 +483,8 @@ def limpiar_tags_calofit(respuesta_estructurada: dict) -> None:
     for s in respuesta_estructurada.get("secciones", []):
         for k in ["nombre", "macros", "gasto_calorico_estimado", "nota"]:
             if s.get(k):
-                s[k] = _re.sub("", str(s[k])).strip()
+                cleaned = _re.sub("", str(s[k])).strip()
+                s[k] = _re_gen.sub("", cleaned).strip()
         for k in ["ingredientes", "ejercicios", "preparacion", "tecnica", "instrucciones"]:
             if s.get(k) and isinstance(s[k], list):
                 s[k] = [_re.sub("", str(item)).strip() for item in s[k]]
