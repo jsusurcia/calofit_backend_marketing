@@ -4,7 +4,7 @@ from datetime import datetime
 
 # --- Esquema para los detalles de cada día ---
 class PlanDiarioResponse(BaseModel):
-    id: int
+    id: Optional[int] = None
     dia_numero: int
     calorias_dia: float
     proteinas_g: float
@@ -41,7 +41,7 @@ class PlanNutricionalResponse(BaseModel):
     client_id: int
     calorias_ia_base: Optional[float] = None
     objetivo: str
-    fecha_creacion: datetime
+    fecha_creacion: Optional[datetime] = None
     es_contingencia_ia: bool = False
     
     # CLAVE: Aquí incluimos los 7 días generados por la IA

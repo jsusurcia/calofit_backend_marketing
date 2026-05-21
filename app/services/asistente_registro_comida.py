@@ -677,13 +677,53 @@ class RegistroComidaHandler:
                         " JOIN alimentos a ON a.id = pi2.alimento_id WHERE p.id = :pid"
                         " GROUP BY p.id, p.nombre"
                     ), {"pid": best_id}).fetchone()
+            # Fallback contains-LIKE en platos ("chaufa" → "arroz chaufa")
+            if not row and len(nn) >= 4:
+                row = db.execute(_sql(
+                    "SELECT p.id, p.nombre,"
+                    " SUM(a.calorias_100g * pi2.gramos / 100.0),"
+                    " SUM(a.proteina_100g * pi2.gramos / 100.0),"
+                    " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
+                    " SUM(a.grasas_100g * pi2.gramos / 100.0)"
+                    " FROM platos p"
+                    " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
+                    " JOIN alimentos a ON a.id = pi2.alimento_id"
+                    " WHERE p.nombre_normalizado LIKE :q"
+                    " GROUP BY p.id, p.nombre"
+                    " ORDER BY LENGTH(p.nombre_normalizado) ASC LIMIT 1"
+                ), {"q": f"%{nn}%"}).fetchone()
+
             if row:
                 matched.append((row, qty))
             else:
                 # REGLA 1: ítem no resuelto por CAPA 1 — registrar para no perderlo silenciosamente
                 _no_resueltos_c1.append(name_part)
 
-        if not matched:
+        # Intentar resolver _no_resueltos via tabla alimentos ANTES del early-return
+        # Esto permite registrar "lomo de ternera" aunque no sea un plato catalogado
+        _svc_pre = AlimentosDBService(db)
+        _pre_kcal = _pre_p = _pre_c = _pre_g = 0.0
+        _pre_nombres: List[str] = []
+        _aun_perdidos_pre: List[str] = []
+        for _nr in _no_resueltos_c1:
+            _aid = _svc_pre.resolver_alimento_id(_nr)
+            if _aid:
+                _gramos_pre = 240.0 if _es_alimento_liquido(_nr) else 100.0
+                _macro_pre = _svc_pre.macros_por_gramos(_aid, _gramos_pre)
+                if _macro_pre and _macro_pre.kcal > 0:
+                    _pre_kcal += _macro_pre.kcal
+                    _pre_p += _macro_pre.p_g
+                    _pre_c += _macro_pre.c_g
+                    _pre_g += _macro_pre.g_g
+                    _pre_nombres.append(_macro_pre.nombre_alimento)
+                    logger.info("CAPA 1b: '%s' resuelto vía alimentos (%.0f g, %.0f kcal)", _nr, _gramos_pre, _macro_pre.kcal)
+                else:
+                    _aun_perdidos_pre.append(_nr)
+            else:
+                _aun_perdidos_pre.append(_nr)
+        _no_resueltos_c1 = _aun_perdidos_pre
+
+        if not matched and not _pre_nombres:
             return None
 
         # Guard anti-duplicado 10 min
@@ -725,6 +765,13 @@ class RegistroComidaHandler:
             c_g  += float(row[4] or 0) * qty
             g_g  += float(row[5] or 0) * qty
             nombres.append(row[1])
+
+        # Acumular ítems resueltos vía tabla alimentos (lomo de ternera, etc.)
+        kcal += _pre_kcal
+        p_g  += _pre_p
+        c_g  += _pre_c
+        g_g  += _pre_g
+        nombres.extend(_pre_nombres)
 
         # CAMBIO 5b — Si todos los platos fueron filtrados por kcal=0, forzar fallback
         if not nombres:
@@ -798,6 +845,29 @@ class RegistroComidaHandler:
         mensaje: str,
     ) -> Dict[str, Any]:
         """Acumula en progreso_calorias y devuelve el dict de respuesta final."""
+        if not extraccion:
+            # Intentar NLPFoodExtractor (maneja múltiples alimentos y composición)
+            try:
+                from app.services.nlp_food_extractor import NLPFoodExtractor
+                _nlp = NLPFoodExtractor(ia_engine, db)
+                _nlp_res = await _nlp.extraer(mensaje)
+                if _nlp_res and _nlp_res.items and _nlp_res.calorias_total > 0:
+                    extraccion = {
+                        "es_comida": True, "es_ejercicio": False,
+                        "calorias":        _nlp_res.calorias_total,
+                        "proteinas_g":     _nlp_res.proteinas_total,
+                        "carbohidratos_g": _nlp_res.carbohidratos_total,
+                        "grasas_g":        _nlp_res.grasas_total,
+                        "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                        "alimentos_detectados": _nlp_res.nombres,
+                        "ejercicios_detectados": [],
+                        "calidad_nutricional": "Media",
+                        "origen": "nlp_extractor",
+                    }
+                    logger.info("CAPA NLP: '%s' → %s (%.0f kcal)", mensaje[:50], _nlp_res.nombres, _nlp_res.calorias_total)
+            except Exception as _nlp_err:
+                logger.warning("NLPFoodExtractor error: %s", _nlp_err)
+
         if not extraccion:
             extraccion = await self._capa5_llm(mensaje, ia_engine, db)
 
@@ -989,16 +1059,18 @@ class RegistroComidaHandler:
             import json
             import re
             prompt = (
-                f"El usuario dijo: '{mensaje}'. Identifica el ALIMENTO O PLATO COMPLEJO. "
-                "IMPORTANTE: Si el alimento NO existe en la gastronomía real (ficticio, mitológico "
-                "o imaginario como 'carne de unicornio', 'huevo de dragón'), devuelve exactamente: "
-                "{\"nombre\":\"__DESCONOCIDO__\",\"calorias\":0,\"proteinas_g\":0,"
-                "\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}\n"
-                "Si el alimento SÍ es real, devuelve SOLO JSON: "
-                "{\"nombre\":\"...\",\"calorias\":0,\"proteinas_g\":0,"
-                "\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}"
+                "Eres nutricionista experto. El usuario dijo: '"
+                + mensaje
+                + "'. Identifica el alimento o plato PRINCIPAL que mencionó.\n"
+                "REGLAS:\n"
+                "- Si el alimento NO existe en la gastronomía real devuelve: "
+                "{\"nombre\":\"__DESCONOCIDO__\",\"calorias\":0,\"proteinas_g\":0,\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}\n"
+                "- Si el alimento SÍ es real, devuelve SOLO JSON con valores REALES (nunca 0 para calorias):\n"
+                "{\"nombre\":\"nombre_del_alimento_en_español\",\"calorias\":NUMERO_REAL,\"proteinas_g\":NUMERO_REAL,\"carbohidratos_g\":NUMERO_REAL,\"grasas_g\":NUMERO_REAL,\"porcion_g\":100}\n"
+                "Ejemplo: {\"nombre\":\"Lomo de ternera\",\"calorias\":187,\"proteinas_g\":27,\"carbohidratos_g\":0,\"grasas_g\":8,\"porcion_g\":100}\n"
+                "Responde SOLO con el JSON, sin texto adicional."
             )
-            resp = await ia_engine.consultar_groq(prompt, sistema="Eres nutricionista. Solo JSON, sin texto extra.")
+            resp = await ia_engine._llamar_groq(prompt=prompt, max_tokens=200, temp=0.1)
             
             resp_clean = resp.strip()
             if "```" in resp_clean:
@@ -1033,7 +1105,21 @@ class RegistroComidaHandler:
             nn       = _norm_al(nombre)
 
             existing = db.query(Alimento).filter(Alimento.nombre_normalizado == nn).first()
-            if not existing:
+            if existing:
+                # Usar macros desde BD (más confiable que estimación LLM)
+                _kcal_real = round(float(existing.calorias_100g or 0), 1)
+                _prot_real = round(float(existing.proteina_100g or 0), 1)
+                _carb_real = round(float(existing.carbohidratos_100g or 0), 1)
+                _gras_real = round(float(existing.grasas_100g or 0), 1)
+                return {
+                    "es_comida": True, "es_ejercicio": False,
+                    "calorias": _kcal_real, "proteinas_g": _prot_real,
+                    "carbohidratos_g": _carb_real, "grasas_g": _gras_real,
+                    "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                    "alimentos_detectados": [existing.nombre], "ejercicios_detectados": [],
+                    "calidad_nutricional": "Alta", "origen": "bd",
+                }
+            else:
                 _kcal = round(data["calorias"] * f, 2)
                 _prot = round(data.get("proteinas_g", 0) * f, 2)
                 _carb = round(data.get("carbohidratos_g", 0) * f, 2)
@@ -1053,17 +1139,16 @@ class RegistroComidaHandler:
                     pendiente_validacion=True,
                 ))
                 db.flush()
-
-            return {
-                "es_comida": True, "es_ejercicio": False,
-                "calorias":        round(float(data["calorias"]), 1),
-                "proteinas_g":     round(float(data.get("proteinas_g", 0)), 1),
-                "carbohidratos_g": round(float(data.get("carbohidratos_g", 0)), 1),
-                "grasas_g":        round(float(data.get("grasas_g", 0)), 1),
-                "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
-                "alimentos_detectados": [nombre], "ejercicios_detectados": [],
-                "calidad_nutricional": "Media", "origen": "llm",
-            }
+                return {
+                    "es_comida": True, "es_ejercicio": False,
+                    "calorias":        round(float(data["calorias"]), 1),
+                    "proteinas_g":     round(float(data.get("proteinas_g", 0)), 1),
+                    "carbohidratos_g": round(float(data.get("carbohidratos_g", 0)), 1),
+                    "grasas_g":        round(float(data.get("grasas_g", 0)), 1),
+                    "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                    "alimentos_detectados": [nombre], "ejercicios_detectados": [],
+                    "calidad_nutricional": "Media", "origen": "llm",
+                }
         except Exception as e:
             logger.error("CAPA 5 LLM error: %s", e)
         return None

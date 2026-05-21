@@ -97,7 +97,7 @@ class AlimentosDBService:
         )
         if al:
             return int(al.alimento_id)
-        # Fallback simple por LIKE (prefijo) para UX; mantener determinista.
+        # Fallback prefijo: "lomo" → "lomo de ternera"
         like = f"{n}%"
         a2 = (
             self.db.query(Alimento)
@@ -105,7 +105,19 @@ class AlimentosDBService:
             .order_by(Alimento.id.asc())
             .first()
         )
-        return int(a2.id) if a2 else None
+        if a2:
+            return int(a2.id)
+        # Fallback contains: "chaufa" → "arroz chaufa", "papaya" → "jugo de papaya"
+        if len(n) >= 4:
+            from sqlalchemy import func as _sqf
+            a3 = (
+                self.db.query(Alimento)
+                .filter(Alimento.nombre_normalizado.like(f"%{n}%"))
+                .order_by(_sqf.length(Alimento.nombre_normalizado).asc())
+                .first()
+            )
+            return int(a3.id) if a3 else None
+        return None
 
     def _resolver_alimento_id_lata(self, nombre: str) -> Optional[int]:
         """

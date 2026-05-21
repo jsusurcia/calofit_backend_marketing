@@ -69,6 +69,20 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     if any(m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
         return REGISTRAR_NUTRICION
 
+    # ── Verbos en pasado al inicio = registro de lo que ya comió ─────────────
+    # "Comí lomo de ternera", "Tomé jugo", "Desayuné avena", "Almorcé arroz"
+    _VERBOS_PASADO_REGISTRO = (
+        "comí ", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
+        "desayuné ", "desayune ", "almorcé ", "almorce ",
+        "cené ", "cene ", "merendé ", "merende ",
+        "me comí ", "me comi ", "acabo de comer ", "acabo de tomar ",
+        "hoy comí ", "hoy comi ", "hoy tomé ", "hoy tome ",
+        "hoy desayuné ", "hoy desayune ", "hoy almorcé ", "hoy almorce ",
+        "hoy cené ", "hoy cene ",
+    )
+    if any(m.startswith(v) for v in _VERBOS_PASADO_REGISTRO):
+        return REGISTRAR_NUTRICION
+
     comida_ctx = (
         "comí",
         "comi ",
@@ -221,9 +235,20 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     """
     if es_saludo or len((mensaje or "").strip()) < 2:
         return OTRO
-    # Pre-check: verbos imperativos → nunca pasar al LLM (evita que clasifique como RECIPE)
+    # Pre-check: verbos imperativos y pasado → nunca pasar al LLM
     _m = (mensaje or "").lower().strip()
     if any(_m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
+        return REGISTRAR_NUTRICION
+    _VERBOS_PASADO_REGISTRO = (
+        "comí ", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
+        "desayuné ", "desayune ", "almorcé ", "almorce ",
+        "cené ", "cene ", "merendé ", "merende ",
+        "me comí ", "me comi ", "acabo de comer ", "acabo de tomar ",
+        "hoy comí ", "hoy comi ", "hoy tomé ", "hoy tome ",
+        "hoy desayuné ", "hoy desayune ", "hoy almorcé ", "hoy almorce ",
+        "hoy cené ", "hoy cene ",
+    )
+    if any(_m.startswith(v) for v in _VERBOS_PASADO_REGISTRO):
         return REGISTRAR_NUTRICION
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje)
