@@ -153,10 +153,10 @@ async def get_daily_summary(
 
     return {
         "dieta_recomendada": {
-            "calorias_diarias": consumo_actual["calorias"],
-            "proteinas_g": consumo_actual["proteinas"],
-            "carbohidratos_g": consumo_actual["carbohidratos"],
-            "grasas_g": consumo_actual["grasas"],
+            "calorias_diarias": plan_objetivo["calorias_objetivo"],
+            "proteinas_g": plan_objetivo["proteinas_objetivo_g"],
+            "carbohidratos_g": plan_objetivo["carbohidratos_objetivo_g"],
+            "grasas_g": plan_objetivo["grasas_objetivo_g"],
             "gasto_metabolico_basal": round(calcular_metabolismo_basal(cliente), 1),
             "imc": round(cliente.weight / ((cliente.height/100)**2), 1) if cliente.height and cliente.weight else 0,
         },

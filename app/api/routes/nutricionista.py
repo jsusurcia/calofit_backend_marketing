@@ -81,38 +81,9 @@ def create_express_patient(
             detail="Este correo ya está registrado como staff en el sistema."
         )
 
-    # 2. Generar el usuario incompleto y vincular con Firebase
-    try:
-        # Importación rápida para evitar dependencias circulares
-        from app.core.firebase import auth as firebase_admin_auth
-        
-        fb_user = firebase_admin_auth.create_user(
-            email=client_data.email,
-            password=client_data.dni,
-            display_name="Paciente CaloFit"
-        )
-        flutter_uid = fb_user.uid
-        print(f"✅ Usuario Firebase creado exitosamente para express: {flutter_uid}")
-        
-    except Exception as e:
-        error_msg = str(e)
-        print(f"❌ Error al crear usuario en Firebase: {error_msg}")
-        
-        # Validación Estricta: Si ya existe en la base de datos central de Firebase
-        if "EMAIL_EXISTS" in error_msg:
-            raise HTTPException(
-                status_code=400, 
-                detail="Este correo electrónico ya está registrado en los servidores de CaloFit."
-            )
-        else:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Error validando la cuenta: {error_msg}"
-            )
-
-    # 3. Guardar en Base de Datos
+    # 2. Guardar en Base de Datos (DNI = clave temporal)
     hashed_dni = security.hash_password(client_data.dni)
-    
+
     nuevo_paciente = Client(
         email=client_data.email,
         dni=client_data.dni,
@@ -120,7 +91,6 @@ def create_express_patient(
         last_name_paternal="",
         last_name_maternal="",
         hashed_password=hashed_dni,
-        flutter_uid=flutter_uid,
         is_profile_complete=False,
         assigned_nutri_id=current_user.id,
         assigned_coach_id=client_data.assigned_coach_id,
@@ -718,9 +688,7 @@ def delete_client(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Elimina permanentemente a un cliente:
-      1. Borra el usuario de Firebase Authentication (por flutter_uid).
-      2. Elimina el registro de la BD (cascade borra historial, planes, etc.).
+    Elimina permanentemente a un cliente y todos sus datos (cascade).
     Solo el Nutricionista asignado o un Admin pueden ejecutar esta acción.
     """
     check_is_nutri(current_user)
@@ -734,17 +702,7 @@ def delete_client(
         if client.assigned_nutri_id != current_user.id:
             raise HTTPException(status_code=403, detail="No tienes permiso para eliminar este paciente.")
 
-    # 1. Eliminar de Firebase Authentication
-    flutter_uid = client.flutter_uid
-    if flutter_uid:
-        try:
-            from firebase_admin import auth as firebase_auth
-            firebase_auth.delete_user(flutter_uid)
-            print(f"🔥 Firebase: Usuario {flutter_uid} eliminado correctamente.")
-        except Exception as e:
-            print(f"⚠️ Firebase: No se pudo eliminar el usuario ({e}). Continuando con la BD...")
-
-    # 2. Borrar PlanDiario y PlanNutricional manualmente ANTES que el cliente
+    # 1. Borrar PlanDiario y PlanNutricional manualmente ANTES que el cliente
     #    (SQLAlchemy hace UPDATE client_id=None en vez de DELETE cuando hay referencias activas)
     planes = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).all()
     for plan in planes:

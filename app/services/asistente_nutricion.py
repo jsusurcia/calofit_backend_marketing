@@ -311,24 +311,6 @@ def _buscar_usda_sync(nombre_en: str) -> Optional[dict]:
         return None
 
 
-def _buscar_fatsecret_sync(nombre_es: str) -> Optional[dict]:
-    """Consulta FatSecret con porcion_g=100 para obtener macros base por 100g."""
-    try:
-        from app.services.fatsecret_client import get_fatsecret_client
-        fs = get_fatsecret_client()
-        if not fs:
-            return None
-        raw = fs.lookup_macros(nombre_es, porcion_g=100)
-        if not raw or raw.get("calorias", 0) <= 0:
-            return None
-        return {
-            "calorias_100g":      round(float(raw["calorias"]), 2),
-            "proteina_100g":      round(float(raw["proteinas"]), 2),
-            "carbohidratos_100g": round(float(raw["carbohidratos"]), 2),
-            "grasas_100g":        round(float(raw["grasas"]), 2),
-        }
-    except Exception:
-        return None
 
 
 def _buscar_colision_local(
@@ -397,13 +379,7 @@ async def _buscar_o_crear_alimento_async(
     macros = await asyncio.to_thread(_buscar_usda_sync, nombre_es)
     fuente = "USDA (auto-aprendido)"
 
-    # 2.5. FatSecret si USDA no devolvió resultados
-    if not macros:
-        macros = await asyncio.to_thread(_buscar_fatsecret_sync, nombre_es)
-        if macros:
-            fuente = "FatSecret (auto-aprendido)"
-
-    # 3. Groq si USDA y FatSecret fallaron
+    # 2.5. Groq si USDA falló
     if not macros:
         try:
             from app.services.ia_service import ia_engine

@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from app.core.cache import get_user_recent_meals
 from app.models.preferencias import PreferenciaAlimento
 from app.services.asistente_modos import bloque_prompt_modo_funcion
-from app.services.ml_service import ml_perfil, ml_recomendador
 from app.services.response_parser import sanear_texto_conversacional_recipe
 
 
@@ -153,33 +152,7 @@ def construir_prompt_cliente(
             f"Luego pregunta qué necesita el cliente."
         )
 
-    # ── Perfil ML (Random Forest) ──
-    bloque_perfil_ml = ""
-    try:
-        _act_map = {"Sedentario": 1, "Ligero": 2, "Moderado": 3, "Intenso": 5, "Muy intenso": 6}
-        act_lvl  = getattr(perfil, "activity_level", "Moderado") or "Moderado"
-        perfil_ml, conf_ml = ml_perfil.predecir_perfil({
-            "age":           edad,
-            "gender":        "M" if getattr(perfil, "gender", "M") == "M" else "F",
-            "weight":        float(perfil.weight or 70),
-            "height":        float(perfil.height or 170),
-            "workout_freq":  _act_map.get(act_lvl, 3),
-            "session_hours": float(getattr(perfil, "session_duration", None) or 1.0),
-            "calories":      round(400 + adherencia_pct * 10),
-            "fat_pct":       round(max(10, 35 - adherencia_pct * 0.3), 1),
-            "water":         round(1.5 + _act_map.get(act_lvl, 3) * 0.2, 1),
-            "avg_bpm": 140, "resting_bpm": 65,
-            "workout_type":  getattr(perfil, "workout_type", "") or "",
-        })
-        bloque_perfil_ml = (
-            f"\n\nPERFIL ML ({perfil_ml}, {conf_ml}% confianza): "
-            f"{ml_perfil.get_tono_asistente(perfil_ml)} "
-            f"OBLIGATORIO: menciona el nivel del usuario ({perfil_ml}) al dar recomendaciones personalizadas."
-        )
-    except Exception:
-        pass
-
-    # ── Recomendaciones Completas (Reemplaza al KNN crudo) ──
+    # ── Recomendaciones Completas ──
     bloque_reco_ml = ""
     if restantes > 100 and modo_funcion == "recomendar_nutricion":
         try:
@@ -295,7 +268,7 @@ def construir_prompt_cliente(
         f"PERFIL: {perfil.weight}kg, {perfil.height}cm, {edad} años, {perfil.gender}. "
         f"ALERGIAS: {texto_alergias}. DIETA: {texto_dieta}. CONDICIONES: {texto_condiciones}."
         f"{bloque_hora}{bloque_rango_kcal}{bloque_anti_repetir}{bloque_favoritos}"
-        f"{bloque_perfil_ml}{bloque_reco_ml}"
+        f"{bloque_reco_ml}"
         f"\nSTATUS DEL DÍA: Meta: {calorias_meta} kcal | Consumido: {consumo_real} kcal | "
         f"Restante: {restantes:.0f} kcal | Adherencia: {adherencia_pct:.0f}% | {mensaje_fuzzy}."
         f"\n\nREGLAS DE INTENCIÓN Y FORMATO (OBLIGATORIO):"

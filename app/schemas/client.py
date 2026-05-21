@@ -21,7 +21,7 @@ class ClientCreate(BaseModel):
     goal: Optional[str] = Field(default="Mantener peso", description="Objetivo de salud")
     workout_type: Optional[str] = Field(default=None, description="Tipo de entrenamiento preferido (para ML)")
     session_duration: Optional[float] = Field(default=None, description="Duración de sesión en horas (para ML)")
-    flutter_uid: str = Field(..., min_length=10, description="Firebase UID único del usuario")
+    flutter_uid: Optional[str] = None
     assigned_coach_id: Optional[int] = None
     assigned_nutri_id: Optional[int] = None
 
@@ -35,15 +35,14 @@ class ClientResponse(BaseModel):
     last_name_paternal: str
     last_name_maternal: str
     email: EmailStr
-    flutter_uid: Optional[str]
     birth_date: Optional[date]
     weight: float
     height: float
     gender: Optional[str] = 'M'
     activity_level: Optional[str] = 'Sedentario'
     goal: Optional[str] = 'Mantener peso'
-    workout_type: Optional[str] = 'Cardio'        # 🆕 Para ML Random Forest
-    session_duration: Optional[float] = 1.0        # 🆕 Para ML Random Forest (en horas)
+    workout_type: Optional[str] = 'Cardio'
+    session_duration: Optional[float] = 1.0
     medical_conditions: List[str] = []
     assigned_coach_id: Optional[int]
     assigned_nutri_id: Optional[int]
@@ -58,7 +57,6 @@ class ClientUpdate(BaseModel):
     last_name_paternal: Optional[str] = None
     last_name_maternal: Optional[str] = None
     email: Optional[EmailStr] = None
-    flutter_uid: Optional[str] = None
     birth_date: Optional[date] = None
     weight: Optional[float] = None
     height: Optional[float] = None
@@ -66,17 +64,19 @@ class ClientUpdate(BaseModel):
     medical_conditions: Optional[List[str]] = None
     activity_level: Optional[str] = None
     goal: Optional[str] = None
-    workout_type: Optional[str] = None             # 🆕 Para ML Random Forest
-    session_duration: Optional[float] = None       # 🆕 Para ML Random Forest (en horas)
+    workout_type: Optional[str] = None
+    session_duration: Optional[float] = None
     profile_picture_url: Optional[str] = None
-    is_profile_complete: Optional[bool] = None  # 🆕 El onboarding lo marca como True al terminar
+    is_profile_complete: Optional[bool] = None
 
 
 class AdminCreateClient(BaseModel):
-    """Schema simplificado para que el Admin cree un usuario: solo email + contraseña"""
+    """Schema para que el Admin/Nutri cree un paciente con credenciales mínimas"""
     email: EmailStr
     password: str = Field(..., min_length=6)
-    flutter_uid: str = Field(..., description="Firebase UID generado por el Admin al crear el usuario en Firebase")
+    first_name: Optional[str] = ""
+    last_name_paternal: Optional[str] = ""
+    last_name_maternal: Optional[str] = ""
     assigned_nutri_id: Optional[int] = None
     assigned_coach_id: Optional[int] = None
 

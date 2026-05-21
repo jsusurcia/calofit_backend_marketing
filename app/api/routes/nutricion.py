@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 # Asegúrate de importar PlanDiario
 from app.models.nutricion import PlanNutricional, PlanDiario
-from app.schemas.nutricion import PlanNutricionalCreate, PlanNutricionalResponse, TestIARequest
+from app.schemas.nutricion import PlanNutricionalCreate, PlanNutricionalResponse
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 
@@ -12,29 +12,6 @@ from app.services.ia_service import ia_engine
 
 router = APIRouter()
 
-# Endpoint temporal para probar IA (Solo para testing/desarrollo)
-@router.post("/test-ia")
-async def test_ia(
-    request: TestIARequest,
-    current_user = Depends(get_current_staff)
-):
-    """
-    Endpoint de prueba para verificar el modelo de IA.
-    🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
-    """
-    print(f"🛠️ Testing IA por: {current_user.email}")
-    ia_engine = get_ia_engine()
-    if not ia_engine:
-        raise HTTPException(status_code=500, detail="Servicio de IA no disponible")
-
-    try:
-        calorias = ia_engine.calcular_requerimiento(
-            genero=request.genero, edad=request.edad, peso=request.peso, talla=request.talla,
-            nivel_actividad=request.nivel_actividad, objetivo=request.objetivo
-        )
-        return {"calorias_recomendadas": calorias, "mensaje": "Prueba exitosa"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en IA: {str(e)}")
 
 @router.post("/", response_model=PlanNutricionalResponse)
 async def crear_plan_nutricional(
@@ -140,53 +117,6 @@ async def crear_plan_nutricional(
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
-# Endpoint temporal para probar NLP y Fuzzy Logic (Solo para testing/desarrollo)
-@router.post("/test-nlp-fuzzy")
-async def test_nlp_fuzzy(
-    request: dict,
-    current_user = Depends(get_current_staff)
-):
-    """
-    Endpoint de prueba para las nuevas funcionalidades de NLP y Fuzzy Logic.
-    🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
-    
-    Parámetros esperados en request:
-    - comando_texto: str (opcional) - Comando en lenguaje natural
-    - perfil_usuario: dict - Perfil del usuario (edad, genero, objetivo, etc.)
-    - adherencia_pct: int (0-100) - Porcentaje de adherencia
-    - progreso_pct: int (0-100) - Porcentaje de progreso
-    """
-    print(f"🛠️ Testing NLP/Fuzzy por: {current_user.email}")
-    try:
-        comando_texto = request.get("comando_texto")
-        perfil_usuario = request.get("perfil_usuario", {})
-        adherencia_pct = request.get("adherencia_pct", 50)
-        progreso_pct = request.get("progreso_pct", 50)
-
-        # Probar NLP si hay comando
-        nlp_result = None
-        if comando_texto:
-            nlp_result = ia_engine.interpretar_comando_nlp(comando_texto)
-
-        # Probar Fuzzy Logic
-        alerta_fuzzy = ia_engine.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
-
-        # Generar recomendación completa con las nuevas features
-        recomendacion = ia_engine.recomendar_alimentos_con_groq(
-            perfil_usuario=perfil_usuario,
-            comando_texto=comando_texto,
-            adherencia_pct=adherencia_pct,
-            progreso_pct=progreso_pct
-        )
-
-        return {
-            "nlp_resultado": nlp_result,
-            "alerta_fuzzy": alerta_fuzzy,
-            "recomendacion_completa": recomendacion,
-            "mensaje": "Prueba de NLP y Fuzzy Logic exitosa"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en NLP/Fuzzy: {str(e)}")
 
 # =================================================================
 # 🍎 NUEVOS ENDPOINTS: GESTIÓN DE PLANES (FLUJO GYM REAL)
@@ -328,3 +258,55 @@ async def obtener_recomendaciones_personalizadas(
             "favoritos": favoritos,
             "nota": "Estas son tus elecciones mas frecuentes"
         }
+
+@router.delete("/comidas/{registro_id}")
+async def eliminar_registro_comida(
+    registro_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Elimina un registro de comida y descuenta sus calorías/macros del progreso diario.
+    """
+    from app.models.comida_registro import ComidaRegistro
+    from app.models.historial import ProgresoCalorias
+    from app.models.client import Client
+    
+    # 1. Verificar usuario
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=403, detail="Usuario no autorizado")
+        
+    # 2. Buscar registro
+    registro = db.query(ComidaRegistro).filter(
+        ComidaRegistro.id == registro_id,
+        ComidaRegistro.client_id == cliente.id
+    ).first()
+    
+    if not registro:
+        raise HTTPException(status_code=404, detail="Registro de comida no encontrado")
+        
+    # 3. Restar del progreso diario
+    fecha_registro = registro.fecha
+    progreso = db.query(ProgresoCalorias).filter(
+        ProgresoCalorias.client_id == cliente.id,
+        ProgresoCalorias.fecha == fecha_registro
+    ).first()
+    
+    if progreso:
+        kcal = float(registro.kcal or 0)
+        prot = float(registro.proteina_g or 0)
+        carb = float(registro.carbohidratos_g or 0)
+        gras = float(registro.grasas_g or 0)
+        
+        progreso.calorias_consumidas = max(0.0, (progreso.calorias_consumidas or 0.0) - kcal)
+        progreso.proteinas_consumidas = max(0.0, round((progreso.proteinas_consumidas or 0.0) - prot, 1))
+        progreso.carbohidratos_consumidos = max(0.0, round((progreso.carbohidratos_consumidos or 0.0) - carb, 1))
+        progreso.grasas_consumidas = max(0.0, round((progreso.grasas_consumidas or 0.0) - gras, 1))
+        
+    # 4. Eliminar el registro
+    db.delete(registro)
+    db.commit()
+    
+    return {"success": True, "message": "Comida eliminada exitosamente"}
+

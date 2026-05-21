@@ -104,13 +104,20 @@ class ExerciseHandler(BaseHandler):
         contexto: Dict[str, Any],
         client_id: int,
     ) -> Dict[str, Any]:
-        # Delegar al módulo existente
         try:
-            from app.services.asistente_registro_ejercicio import procesar_registro_ejercicio
-            result = await procesar_registro_ejercicio(
+            from app.models.client import Client
+            from app.services.ia_service import ia_engine
+            from app.services.asistente_registro_ejercicio import registro_ejercicio_handler
+            
+            perfil_obj = self.db.query(Client).filter(Client.id == client_id).first()
+            if not perfil_obj:
+                return ResponseParser.texto("No encontré tu perfil para registrar el ejercicio.")
+
+            result = await registro_ejercicio_handler.registrar(
                 mensaje=mensaje,
-                client_id=client_id,
+                perfil=perfil_obj,
                 db=self.db,
+                ia_engine=ia_engine,
             )
             texto = result.get("mensaje", "Ejercicio registrado.")
             return ResponseParser.texto(mensaje=texto)

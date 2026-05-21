@@ -76,18 +76,41 @@ class RecomendacionesHandler:
         }
         workout_type = _WT_MAP.get(_wt_raw.lower(), _wt_raw)
 
+        # fat_pct: fórmula Deurenberg desde BMI, edad y género (estimación clínica estándar)
+        bmi = peso / ((altura_cm / 100) ** 2)
+        genero = str(getattr(perfil, "gender", "M") or "M").upper()
+        _es_hombre = genero in ("M", "MALE")
+        fat_pct = (1.2 * bmi) + (0.23 * edad) - (10.8 if _es_hombre else 0) - 5.4
+        fat_pct = round(max(10.0, min(45.0, fat_pct)), 1)
+
+        # water: litros/día estimados desde peso + nivel de actividad
+        _ACT_FACTOR = {
+            "sedentario": 0.030, "ligero": 0.033,
+            "moderado": 0.035, "intenso": 0.040, "muy intenso": 0.045,
+        }
+        _act = str(getattr(perfil, "activity_level", "moderado") or "moderado").lower()
+        water = round(max(1.5, min(4.0, peso * _ACT_FACTOR.get(_act, 0.035))), 1)
+
+        # avg_bpm: valor típico por tipo de entreno (datos Kaggle dataset)
+        _BPM_MAP = {"Cardio": 155, "HIIT": 165, "Strength": 130, "Yoga": 110}
+        avg_bpm = float(_BPM_MAP.get(workout_type, 140))
+
+        # resting_bpm: estimar desde frecuencia de entrenamiento semanal
+        # Más entrenos → corazón más eficiente → BPM reposo menor
+        resting_bpm = round(max(50.0, min(75.0, 72.0 - registros_activos * 1.5)), 1)
+
         return {
             "age":           edad,
-            "gender":        getattr(perfil, "gender", "M"),
+            "gender":        genero,
             "weight":        peso,
             "height":        altura_cm,
             "workout_freq":  registros_activos,
             "session_hours": session_h,
             "calories":      round(float(avg_quemadas), 1),
-            "fat_pct":       25.0,   # no disponible en BD → default seguro
-            "water":         2.0,    # no disponible en BD → default seguro
-            "avg_bpm":       140.0,  # no disponible en BD → default seguro
-            "resting_bpm":   65.0,   # no disponible en BD → default seguro
+            "fat_pct":       fat_pct,
+            "water":         water,
+            "avg_bpm":       avg_bpm,
+            "resting_bpm":   resting_bpm,
             "workout_type":  workout_type,
         }
 

@@ -30,9 +30,8 @@ def initialize_firebase():
             firebase_admin.initialize_app(cred)
             
     except Exception as e:
-        print(f"❌ Error crítico en Firebase: {e}")
-        # En producción, esto debería detener la app
-        raise e
+        print(f"Firebase no disponible: {e}")
+        # No detener la app — Firebase es opcional en esta etapa
 
 # Ejecutamos la inicialización al importar el módulo
 initialize_firebase()

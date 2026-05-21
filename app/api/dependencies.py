@@ -7,8 +7,6 @@ from app.core.database import SessionLocal
 from app.services.nutrition.food.resolver.source_resolver import FoodSourceResolver
 from app.services.nutrition.food.resolver.cache_manager import CacheManager
 from app.services.nutrition.plate.plate_builder import PlatoBuilder
-from app.services.exercise.routine.routine_builder import RoutineBuilder
-from app.services.assistant.assistant_orchestrator import AssistantOrchestrator
 import logging
 
 logger = logging.getLogger(__name__)
@@ -46,13 +44,3 @@ def get_plate_builder(
     return PlatoBuilder(db, food_resolver, cache_manager)
 
 
-def get_routine_builder(db: Session = Depends(get_db)) -> RoutineBuilder:
-    """Obtiene constructor de rutinas."""
-    return RoutineBuilder(db)
-
-
-def get_assistant_orchestrator(
-    db: Session = Depends(get_db),
-) -> AssistantOrchestrator:
-    """Obtiene orquestador del asistente."""
-    return AssistantOrchestrator(db)

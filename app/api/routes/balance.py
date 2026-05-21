@@ -216,8 +216,39 @@ async def eliminar_registro(
     # Guardar nombre para el mensaje
     nombre_registro = registro.alimento if tipo == "alimento" else registro.ejercicio
     
+    # Extraer macros antes de eliminar para restar del progreso
+    if tipo == "alimento":
+        cal_diff = registro.calorias or 0
+        prot_diff = registro.proteinas or 0
+        carb_diff = registro.carbohidratos or 0
+        gras_diff = registro.grasas or 0
+    else:
+        cal_quemadas_diff = registro.calorias_quemadas or 0
+        
+    from datetime import timedelta
+    if registro.ultima_vez.tzinfo is None:
+        fecha_registro = (registro.ultima_vez - timedelta(hours=5)).date()
+    else:
+        fecha_registro = registro.ultima_vez.date()
+    
     # Eliminar registro
     db.delete(registro)
+    
+    # Actualizar ProgresoCalorias de ese día
+    progreso = db.query(ProgresoCalorias).filter(
+        ProgresoCalorias.client_id == cliente.id,
+        ProgresoCalorias.fecha == fecha_registro
+    ).first()
+    
+    if progreso:
+        if tipo == "alimento":
+            progreso.calorias_consumidas = max(0, round((progreso.calorias_consumidas or 0) - cal_diff))
+            progreso.proteinas_consumidas = max(0.0, round((progreso.proteinas_consumidas or 0.0) - float(prot_diff), 2))
+            progreso.carbohidratos_consumidos = max(0.0, round((progreso.carbohidratos_consumidos or 0.0) - float(carb_diff), 2))
+            progreso.grasas_consumidas = max(0.0, round((progreso.grasas_consumidas or 0.0) - float(gras_diff), 2))
+        else:
+            progreso.calorias_quemadas = max(0, round((progreso.calorias_quemadas or 0) - cal_quemadas_diff))
+            
     db.commit()
     
     # Recalcular balance

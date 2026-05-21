@@ -24,9 +24,6 @@ import os
 import json
 import re
 import asyncio
-import pandas as pd
-import numpy as np
-import joblib
 import httpx
 from typing import List, Optional, Dict, Tuple
 
@@ -35,12 +32,6 @@ try:
 except ImportError:
     AsyncGroq = None
 
-try:
-    import skfuzzy as fuzz
-    from skfuzzy import control as ctrl
-except ImportError:
-    fuzz = None
-    ctrl = None
 
 from app.core.config import settings
 from app.core.mets_gym import METS_GYM
@@ -105,8 +96,6 @@ class IAService:
         self._fs_client_secret = getattr(settings, "FATSECRET_CLIENT_SECRET", None)
         self._fs_token         = None
 
-        # Motor de Lógica Difusa (Diagnóstico)
-        self._alerta_sim = self._setup_fuzzy_logic()
 
     # ══════════════════════════════════════════════════════════════════
     # PILAR 1: CÁLCULO CLÍNICO (Mifflin-St Jeor)
@@ -161,48 +150,17 @@ class IAService:
         return macros_desde_calorias_peso_objetivo(calorias, objetivo, peso)
 
     # ══════════════════════════════════════════════════════════════════
-    # LÓGICA DIFUSA (Diagnóstico de Adherencia)
+    # DIAGNÓSTICO DE ADHERENCIA
     # ══════════════════════════════════════════════════════════════════
 
-    def _setup_fuzzy_logic(self):
-        if not (fuzz and ctrl): return None
-        try:
-            adherencia = ctrl.Antecedent(np.arange(0, 101, 1), "adherencia")
-            progreso   = ctrl.Antecedent(np.arange(0, 101, 1), "progreso")
-            alerta     = ctrl.Consequent(np.arange(0, 101, 1), "alerta")
-
-            adherencia["baja"]  = fuzz.trimf(adherencia.universe, [0,   0,  50])
-            adherencia["media"] = fuzz.trimf(adherencia.universe, [25, 50,  75])
-            adherencia["alta"]  = fuzz.trimf(adherencia.universe, [50, 100, 100])
-
-            progreso["lento"]  = fuzz.trimf(progreso.universe, [0,   0,  50])
-            progreso["normal"] = fuzz.trimf(progreso.universe, [25, 50,  75])
-            progreso["rapido"] = fuzz.trimf(progreso.universe, [50, 100, 100])
-
-            alerta["suave"]    = fuzz.trimf(alerta.universe, [0,   0,  40])
-            alerta["moderada"] = fuzz.trimf(alerta.universe, [30, 50,  70])
-            alerta["estricta"] = fuzz.trimf(alerta.universe, [60, 100, 100])
-
-            rules = [
-                ctrl.Rule(adherencia["alta"]  & progreso["rapido"], alerta["suave"]),
-                ctrl.Rule(adherencia["media"] & progreso["normal"], alerta["moderada"]),
-                ctrl.Rule(adherencia["baja"]  | progreso["lento"],  alerta["estricta"]),
-            ]
-            return ctrl.ControlSystemSimulation(ctrl.ControlSystem(rules))
-        except: return None
-
     def generar_alerta_fuzzy(self, adh_pct: float, prog_pct: float) -> Dict:
-        if not self._alerta_sim: return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
-        try:
-            self._alerta_sim.input["adherencia"] = max(0, min(100, adh_pct))
-            self._alerta_sim.input["progreso"]   = max(0, min(100, prog_pct))
-            self._alerta_sim.compute()
-            score = self._alerta_sim.output["alerta"]
-            if score < 40: nivel, msg = "Bajo",  "Excelente ritmo."
-            elif score < 70: nivel, msg = "Medio", "Estable, sigue así."
-            else: nivel, msg = "Alto",  "Necesitas refuerzo motivaional."
-            return {"nivel": nivel, "score": round(float(score), 2), "mensaje": msg}
-        except: return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
+        adh = max(0.0, min(100.0, float(adh_pct)))
+        prog = max(0.0, min(100.0, float(prog_pct)))
+        if adh >= 70 and prog >= 50:
+            return {"nivel": "Bajo", "score": 20.0, "mensaje": "Excelente ritmo."}
+        if adh < 40 or prog < 25:
+            return {"nivel": "Alto", "score": 80.0, "mensaje": "Necesitas refuerzo motivacional."}
+        return {"nivel": "Medio", "score": 50.0, "mensaje": "Estable, sigue así."}
 
     # ══════════════════════════════════════════════════════════════════
     # PROCESAMIENTO NLP (Llama-3 vía Groq)
@@ -569,41 +527,6 @@ Reglas:
                 "origen": info_db.get("origen", "BD Oficial"),
             }
 
-        # ─────────────────────────────────────────────────────────────
-        # PASO 3b: FatSecret API (macros estándar) antes del LLM
-        # ─────────────────────────────────────────────────────────────
-        if not getattr(settings, "DISABLE_FATSECRET", False):
-            try:
-                from app.services.fatsecret_client import get_fatsecret_client, simplify_text_for_fatsecret_query
-
-                fs = get_fatsecret_client()
-                if fs:
-                    q = simplify_text_for_fatsecret_query(texto)
-                    if len(q) >= 2:
-                        hit = await asyncio.to_thread(fs.lookup_macros, q, porcion_g)
-                        if hit and float(hit.get("calorias", 0) or 0) > 0:
-                            print(
-                                f"[FatSecret] '{q}' -> {hit.get('nombre')} "
-                                f"= {hit['calorias']} kcal (porción ref. {porcion_g}g)"
-                            )
-                            return {
-                                "es_comida": True,
-                                "es_ejercicio": False,
-                                "calorias": float(hit["calorias"]),
-                                "proteinas_g": float(hit.get("proteinas", 0) or 0),
-                                "carbohidratos_g": float(hit.get("carbohidratos", 0) or 0),
-                                "grasas_g": float(hit.get("grasas", 0) or 0),
-                                "fibra_g": float(hit.get("fibra", 0) or 0),
-                                "azucar_g": float(hit.get("azucares", 0) or 0),
-                                "sodio_mg": float(hit.get("sodio", 0) or 0),
-                                "alimentos_detectados": [hit.get("nombre", q)],
-                                "ejercicios_detectados": [],
-                                "calidad_nutricional": "Alta",
-                                "porcion_g": porcion_g,
-                                "origen": hit.get("origen", "FatSecret API"),
-                            }
-            except Exception as e:
-                print(f"[FatSecret] {e}")
 
         # ─────────────────────────────────────────────────────────────
         # PASO 4: LLM como último recurso (platos compuestos no en BD)

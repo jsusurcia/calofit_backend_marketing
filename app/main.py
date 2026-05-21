@@ -2,34 +2,25 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+import logging
 from app.core.database import engine, Base
 from app.core import firebase
+from app.core.rate_limit import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from app.models import user, client, role, historial 
+_startup_log = logging.getLogger("calofit.startup")
+
+from app.models import user, client, role, historial
 from app.api import api_router
 from app.api.routes.websockets import router as websocket_router
 
-# ✅ REMOVER IMPORTACIÓN DIRECTA - YA ESTÁ EN api_router
-# from app.api.routes.clientes import router as clientes_router
-
-Base.metadata.create_all(bind=engine) 
-
-# ✅ MIGRACIONES MANUALES: Columnas añadidas post-creación inicial
-from sqlalchemy import text
-with engine.connect() as connection:
-    try:
-        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS dni VARCHAR UNIQUE;"))
-        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS workout_type VARCHAR DEFAULT 'Cardio';"))
-        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
-        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
-        # Eliminar tabla obsoleta (reemplazada por platos + plato_ingredientes + historial_recomendaciones)
-        connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
-        connection.commit()
-        print("✅ Migraciones manuales aplicadas correctamente.")
-    except Exception as e:
-        print(f"⚠️ Error en migración manual: {e}")
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CaloFit - Gimnasio World Light API")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +47,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ✅ REMOVER REGISTRO DIRECTO - YA ESTÁ EN api_router
 # app.include_router(clientes_router, prefix="/clientes", tags=["clientes"])
+
 
 @app.get("/")
 def read_root():

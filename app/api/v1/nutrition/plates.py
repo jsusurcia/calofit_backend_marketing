@@ -11,7 +11,6 @@ import logging
 from app.api.dependencies import (
     get_db,
     get_plate_builder,
-    get_assistant_orchestrator,
 )
 from app.models import ProgresoCalorias, HistorialRecomendacion
 # from app.schemas.nutrition import NutricionResponse # Ajustado para evitar error si no existe

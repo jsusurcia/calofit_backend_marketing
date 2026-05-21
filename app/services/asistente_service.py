@@ -115,11 +115,9 @@ class AsistenteService:
         # Modo funcional + guard rails
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)
 
-        # ── Redirección imperativa: "Regístrame / Anota / Guarda" → NLP handler ──
+        # ── Redirección imperativa: Registro de nutrición → NLP handler ──
         # Evita que el flujo consultar() muestre una tarjeta RECIPE sin persistir.
-        if modo_funcion == REGISTRAR_NUTRICION and any(
-            msg_limpio.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO
-        ):
+        if modo_funcion == REGISTRAR_NUTRICION:
             return await registro_comida_handler.registrar(
                 mensaje, perfil, plan_hoy_data, db, self.ia
             )
@@ -217,9 +215,6 @@ class AsistenteService:
         except Exception:
             plan_hoy_data = {"calorias_dia": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}
 
-        from app.services.asistente_ejercicio import frase_registro_actividad_fisica, frase_vocabulario_gimnasio
-        if frase_registro_actividad_fisica(mensaje) or frase_vocabulario_gimnasio(mensaje):
-            return await registro_ejercicio_handler.registrar(mensaje, perfil, db, self.ia)
         return await registro_comida_handler.registrar(mensaje, perfil, plan_hoy_data, db, self.ia)
 
     # ── 2b. Registro manual ───────────────────────────────────────────────────

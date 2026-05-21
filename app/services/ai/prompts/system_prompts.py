@@ -37,7 +37,14 @@ class SystemPrompts:
         if tono:
             partes.append(tono)
         if perfil:
-            partes.append(f"Perfil del cliente: {perfil}.")
+            mapa_perfiles = {
+                "PERFIL_A": "Nivel Principiante",
+                "PERFIL_B": "Nivel Intermedio",
+                "PERFIL_C": "Nivel Avanzado",
+                "PERFIL_D": "Nivel Experto"
+            }
+            perfil_amigable = mapa_perfiles.get(perfil.upper(), perfil)
+            partes.append(f"Perfil del cliente: {perfil_amigable}.")
         return "\n\n".join(partes)
 
     @staticmethod

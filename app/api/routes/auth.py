@@ -74,32 +74,19 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if not password_correct_locally:
         print(f"⚠️ Contraseña local incorrecta para {user.email}")
         
-        # ✅ SOLUCIÓN: Si Flutter ya mandó un UID, significa que Firebase YA VALIDÓ la clave.
-        # Solo necesitamos verificar que el UID coincida o que el email sea válido.
-        if credentials.firebase_uid:
-            print("✅ Validando mediante Firebase UID enviado desde el móvil...")
-            # Sincronizamos el hash local con la nueva contraseña que funcionó en el móvil
-            user.hashed_password = security.hash_password(credentials.password)
-            
-            # Si el usuario no tenía UID guardado, se lo ponemos
-            if hasattr(user, 'flutter_uid') and not user.flutter_uid:
-                user.flutter_uid = credentials.firebase_uid
-                
-            db.commit()
-            db.refresh(user)
-            print("🔄 Hash sincronizado localmente con éxito.")
-        else:
-            # Si no hay UID y la clave local falla, entonces sí es error
-            print(f"❌ Login fallido: Clave incorrecta y sin UID de respaldo.")
-            raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+        print(f"❌ Login fallido: Clave incorrecta y sin UID de respaldo.")
+        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
-    # 3️⃣ Asegurar que el UID esté guardado si viene en la petición
-    if credentials.firebase_uid and hasattr(user, 'flutter_uid'):
-        if user.flutter_uid != credentials.firebase_uid:
-            user.flutter_uid = credentials.firebase_uid
-            db.commit()
+    # 3.5️⃣ Bloquear cuenta inactiva (pago pendiente de validación)
+    if user_type == "client":
+        is_active = getattr(user, 'is_active', True)
+        if not is_active:
+            raise HTTPException(
+                status_code=403,
+                detail="Cuenta pendiente de activación. Tu pago aún no ha sido verificado por el administrador."
+            )
 
-    # 3.5️⃣ Verificación de Onboarding Forzoso de Nutrición (Flujo Express)
+    # 3.6️⃣ Verificación de Onboarding
     is_profile_complete = getattr(user, 'is_profile_complete', True)
     if user_type == "client" and not is_profile_complete:
         print(f"⚠️ AVISO (EXPRESS): El perfil de {user.email} está incompleto. Se permite login para onboarding.")
@@ -119,7 +106,6 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     response_data = {
         "access_token": access_token,
         "token_type": "bearer",
-        "firebase_uid": user.flutter_uid if hasattr(user, 'flutter_uid') else None,
         "user_info": {
             "name": user.first_name,
             "last_name": getattr(user, 'last_name_paternal', ''),
@@ -129,6 +115,7 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
             "role": getattr(user, 'role_name', 'client') if user_type == "staff" else None,
             "profile_picture_url": getattr(user, 'profile_picture_url', None),
             "is_profile_complete": is_profile_complete,
+            "is_active": getattr(user, 'is_active', True),
         },
     }
     print(f"📦 Respuesta de login: {response_data}")
@@ -369,17 +356,6 @@ async def change_password(
     if data.new_password != data.confirm_password:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
     
-    # Sincronizar con Firebase si tiene UID
-    flutter_uid = getattr(current_user, 'flutter_uid', None)
-    if flutter_uid:
-        try:
-            from app.core.firebase import auth as firebase_admin_auth
-            firebase_admin_auth.update_user(flutter_uid, password=data.new_password)
-            print(f"✅ Firebase Password Sync OK")
-        except Exception as e:
-            print(f"⚠️ Error sincronizando con Firebase: {e}")
-            # Continuamos para que al menos la DB local se actualice
-
     current_user.hashed_password = security.hash_password(data.new_password)
     db.commit()
     
@@ -446,18 +422,7 @@ async def verify_and_sync_password(
             "sync_message": "Contraseña sincronizada desde Firebase"
         }
         
-        # 4. Si es cliente, agregar firebase_uid
-        if user_type == "client" and hasattr(user, 'flutter_uid'):
-            response_data["firebase_uid"] = user.flutter_uid
-            response_data["user_info"] = {
-                "id": user.id,
-                "email": user.email,
-                "name": user.first_name,
-                "type": user_type,
-                "profile_picture_url": user.profile_picture_url,
-            }
-        else:
-            response_data["user_info"] = {
+        response_data["user_info"] = {
                 "id": user.id,
                 "email": user.email,
                 "name": user.first_name,

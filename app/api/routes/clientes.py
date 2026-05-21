@@ -41,13 +41,12 @@ def admin_crear_cliente(
         raise HTTPException(status_code=400, detail="Este correo ya está registrado")
 
     nuevo = Client(
-        first_name="",           # Se completará en el Onboarding
-        last_name_paternal="",
-        last_name_maternal="",
+        first_name=data.first_name or "",
+        last_name_paternal=data.last_name_paternal or "",
+        last_name_maternal=data.last_name_maternal or "",
         email=data.email,
         hashed_password=security.hash_password(data.password),
-        flutter_uid=data.flutter_uid,
-        gender="M",              # Valor por defecto hasta el Onboarding
+        gender="M",
         weight=0.0,
         height=0.0,
         activity_level="Sedentario",
@@ -102,7 +101,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
         goal=cliente_data.goal or 'Mantener peso',
         assigned_coach_id=cliente_data.assigned_coach_id,
         assigned_nutri_id=cliente_data.assigned_nutri_id,
-        flutter_uid=cliente_data.flutter_uid
     )
     
     try:
@@ -219,12 +217,14 @@ def obtener_perfil_cliente(
         last_name_paternal=current_user.last_name_paternal or "",
         last_name_maternal=current_user.last_name_maternal or "",
         email=current_user.email,
-        flutter_uid=current_user.flutter_uid,
         birth_date=current_user.birth_date,
         weight=current_user.weight or 0.0,
         height=current_user.height or 0.0,
+        gender=current_user.gender or "M",
         activity_level=current_user.activity_level or "Sedentario",
         goal=current_user.goal or "Mantener peso",
+        workout_type=current_user.workout_type or "Cardio",
+        session_duration=current_user.session_duration or 1.0,
         medical_conditions=current_user.medical_conditions or [],
         assigned_coach_id=current_user.assigned_coach_id,
         assigned_nutri_id=current_user.assigned_nutri_id,
@@ -427,246 +427,8 @@ def actualizar_perfil_cliente(
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
-# ✅ NUEVO ENDPOINT: Vincular UID de Flutter con perfil de salud
-@router.put("/vincular-uid")
-def vincular_uid_flutter(
-    flutter_uid: str,
-    current_user = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Asocia el UID de Firebase/Flutter con el perfil de salud del cliente.
-    Este endpoint permite que la app móvil envíe su UID único para vincularse correctamente.
-    
-    Parámetros:
-    - flutter_uid: UID único generado por Flutter/Firebase
-    
-    Ejemplo de uso desde Flutter:
-    ```
-    PUT /clientes/vincular-uid?flutter_uid=abc123def456
-    Headers: Authorization: Bearer {token_jwt}
-    ```
-    """
-    
-    print(f"🔗 Vinculando UID de Flutter: {flutter_uid} al cliente ID: {current_user.id}")
-    
-    # Verificar que sea un cliente
-    if not isinstance(current_user, Client):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo clientes pueden vincular UID de Flutter"
-        )
-    
-    try:
-        # Verificar si el UID ya está vinculado a otro usuario
-        existing = db.query(Client).filter(
-            Client.flutter_uid == flutter_uid,
-            Client.id != current_user.id
-        ).first()
-        
-        if existing:
-            print(f"❌ UID ya está vinculado a otro usuario")
-            raise HTTPException(
-                status_code=400,
-                detail="Este UID de Flutter ya está vinculado a otro usuario"
-            )
-        
-        # Actualizar el UID de Flutter del cliente actual
-        current_user.flutter_uid = flutter_uid
-        db.commit()
-        
-        print(f"✅ UID vinculado exitosamente al cliente {current_user.first_name}")
-        
-        return {
-            "message": "UID de Flutter vinculado exitosamente",
-            "client_id": current_user.id,
-            "flutter_uid": flutter_uid,
-            "user": current_user.first_name + " " + current_user.last_name_paternal
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print(f"❌ Error vinculando UID: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al vincular UID: {str(e)}"
-        )
 
 
-# ✅ NUEVO ENDPOINT: Obtener perfil por UID de Flutter CON DIETA AUTOMÁTICA
-@router.get("/por-uid/{flutter_uid}", response_model=ClientResponseConDieta)
-def obtener_perfil_por_uid_con_dieta(
-    flutter_uid: str,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """
-    Obtiene el perfil de salud completo CON RECOMENDACIÓN DE DIETA AUTOMÁTICA 
-    usando el UID de Flutter e incluyendo condiciones médicas.
-    
-    🔒 REQUIERE AUTENTICACIÓN: Solo el dueño del perfil puede acceder.
-    """
-    
-    print(f"🔍 Buscando perfil + dieta por UID de Flutter: {flutter_uid}")
-    
-    # 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el usuario sea el dueño del perfil
-    if isinstance(current_user, Client):
-        if current_user.flutter_uid != flutter_uid:
-            print(f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}")
-            raise HTTPException(
-                status_code=403,
-                detail="No tienes permiso para acceder a este perfil"
-            )
-    elif not (hasattr(current_user, 'role_name') and current_user.role_name in ['admin', 'nutritionist', 'coach']):
-        # Si no es cliente ni staff, denegar acceso
-        raise HTTPException(
-            status_code=403,
-            detail="No autorizado para acceder a perfiles de clientes"
-        )
-    
-    cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()
-    
-    if not cliente:
-        print(f"❌ No se encontró cliente con UID: {flutter_uid}")
-        raise HTTPException(
-            status_code=404,
-            detail="Perfil de salud no encontrado para este UID de Flutter"
-        )
-    
-    print(f"✅ Perfil encontrado para {cliente.first_name}")
-    
-    # ✅ Calcular edad
-    edad = 30  
-    if cliente.birth_date:
-        today = date.today()
-        edad = today.year - cliente.birth_date.year - (
-            (today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day)
-        )
-    
-    # Calcular recomendación de dieta
-    recomendacion = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
-        peso=cliente.weight or 70,
-        altura=cliente.height or 170,
-        edad=edad,
-        genero=cliente.gender or 'M',
-        nivel_actividad=cliente.activity_level or 'Moderado',
-        objetivo=cliente.goal or 'Mantener peso'
-    )
-    
-    # Convertir recomendación a schema
-    dieta_schema = RecomendacionDietaCompleta(
-        calorias_diarias=recomendacion.calorias_diarias,
-        proteinas_g=recomendacion.proteinas_g,
-        carbohidratos_g=recomendacion.carbohidratos_g,
-        grasas_g=recomendacion.grasas_g,
-        imc=recomendacion.imc,
-        categoria_imc=recomendacion.categoria_imc,
-        gasto_metabolico_basal=recomendacion.gasto_metabolico_basal,
-        objetivo_recomendado=recomendacion.objetivo_recomendado,
-        alimentos_recomendados=recomendacion.alimentos_recomendados,
-        alimentos_a_evitar=recomendacion.alimentos_a_evitar,
-        frecuencia_comidas=recomendacion.frecuencia_comidas,
-        notas=recomendacion.notas
-    )
-    
-    # ✅ CREAR RESPUESTA INCLUYENDO medical_conditions
-    perfil_response = ClientResponseConDieta(
-        id=cliente.id,
-        first_name=cliente.first_name or "",
-        last_name_paternal=cliente.last_name_paternal or "",
-        last_name_maternal=cliente.last_name_maternal or "",
-        email=cliente.email,
-        flutter_uid=cliente.flutter_uid,
-        birth_date=cliente.birth_date,
-        weight=cliente.weight or 0.0,
-        height=cliente.height or 0.0,
-        gender=cliente.gender or "M",
-        # 🔥 AQUÍ ESTABA EL ERROR: Agregamos las condiciones médicas para que Flutter las vea
-        medical_conditions=cliente.medical_conditions or [],
-        goal=cliente.goal,
-        activity_level=cliente.activity_level,
-        assigned_coach_id=cliente.assigned_coach_id,
-        assigned_nutri_id=cliente.assigned_nutri_id,
-        profile_picture_url=cliente.profile_picture_url,
-        dieta_recomendada=dieta_schema
-    )
-    
-    print(f"✅ Perfil completo enviado (Condiciones: {len(perfil_response.medical_conditions)})")
-    
-    return perfil_response
-
-
-# ✅ MANTENER ENDPOINT ANTERIOR (sin dieta) para compatibilidad
-@router.get("/por-uid-simple/{flutter_uid}")
-def obtener_perfil_por_uid(
-    flutter_uid: str,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """
-    Obtiene el perfil de salud simple usando el UID de Flutter (SIN dieta automática).
-    
-    🔒 REQUIERE AUTENTICACIÓN: Solo el dueño del perfil puede acceder.
-    
-    Este es el endpoint anterior, mantenido para compatibilidad.
-    Para obtener perfil CON dieta automática, usa: GET /clientes/por-uid/{flutter_uid}
-    
-    Parámetro:
-    - flutter_uid: UID único de Firebase/Flutter
-    
-    Ejemplo de uso desde Flutter:
-    ```
-    GET /clientes/por-uid-simple/abc123def456
-    Headers: Authorization: Bearer {token}
-    ```
-    """
-    
-    print(f"🔍 Buscando perfil simple por UID de Flutter: {flutter_uid}")
-    
-    # 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el usuario sea el dueño del perfil
-    if isinstance(current_user, Client):
-        if current_user.flutter_uid != flutter_uid:
-            print(f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}")
-            raise HTTPException(
-                status_code=403,
-                detail="No tienes permiso para acceder a este perfil"
-            )
-    elif not (hasattr(current_user, 'role_name') and current_user.role_name in ['admin', 'nutritionist', 'coach']):
-        # Si no es cliente ni staff, denegar acceso
-        raise HTTPException(
-            status_code=403,
-            detail="No autorizado para acceder a perfiles de clientes"
-        )
-    
-    cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()
-    
-    if not cliente:
-        print(f"❌ No se encontró cliente con UID: {flutter_uid}")
-        raise HTTPException(
-            status_code=404,
-            detail="Perfil de salud no encontrado para este UID de Flutter"
-        )
-    
-    print(f"✅ Perfil encontrado para {cliente.first_name}")
-    
-    perfil_response = ClientResponse(
-        id=cliente.id,
-        first_name=cliente.first_name or "",
-        last_name_paternal=cliente.last_name_paternal or "",
-        last_name_maternal=cliente.last_name_maternal or "",
-        email=cliente.email,
-        flutter_uid=cliente.flutter_uid,
-        birth_date=cliente.birth_date,
-        weight=cliente.weight or 0.0,
-        height=cliente.height or 0.0,
-        assigned_coach_id=cliente.assigned_coach_id,
-        assigned_nutri_id=cliente.assigned_nutri_id,
-        profile_picture_url=cliente.profile_picture_url
-    )
-    
-    return perfil_response
 
 
 # ✅ Check-in Mensual
@@ -883,7 +645,6 @@ def recalcular_dieta(
         last_name_paternal=cliente.last_name_paternal or "",
         last_name_maternal=cliente.last_name_maternal or "",
         email=cliente.email,
-        flutter_uid=cliente.flutter_uid,
         birth_date=cliente.birth_date,
         weight=cliente.weight or 0.0,
         height=cliente.height or 0.0,

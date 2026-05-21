@@ -65,7 +65,6 @@ class ClientResponseConDieta(BaseModel):
     last_name_paternal: str
     last_name_maternal: str
     email: str
-    flutter_uid: Optional[str]
     birth_date: Optional[date]
     weight: float
     height: float
@@ -73,6 +72,9 @@ class ClientResponseConDieta(BaseModel):
     activity_level: Optional[str]
     assigned_coach_id: Optional[int]
     assigned_nutri_id: Optional[int]
+    workout_type: Optional[str]
+    session_duration: Optional[float]
+    gender: Optional[str]
     medical_conditions: List[str] = []
     profile_picture_url: Optional[str] = None
 
@@ -88,12 +90,14 @@ class ClientResponseConDieta(BaseModel):
                 "last_name_paternal": "García",
                 "last_name_maternal": "López",
                 "email": "juan@email.com",
-                "flutter_uid": "abc123xyz",
                 "birth_date": "1990-05-15",
                 "weight": 75.5,
                 "height": 180,
                 "goal": "Mantener peso",
                 "activity_level": "Moderada",
+                "workout_type": "Fuerza",
+                "session_duration": 1.5,
+                "gender": "M",
                 "assigned_coach_id": 1,
                 "assigned_nutri_id": 2,
                 "dieta_recomendada": {

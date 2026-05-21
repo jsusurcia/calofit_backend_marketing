@@ -11,11 +11,12 @@ Toda la lógica de negocio está delegada a:
 """
 
 import traceback
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
+from app.core.rate_limit import limiter
 from app.services.asistente_service import asistente_service
 from app.models.historial import SugerenciaGuardada
 from app.models.client import Client
@@ -65,8 +66,10 @@ class GuardarSugerenciaRequest(BaseModel):
 
 
 @router.post("/consultar")
+@limiter.limit("20/minute")
 async def consultar_asistente(
-    request: ChatRequest,
+    request: Request,
+    body: ChatRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -76,13 +79,13 @@ async def consultar_asistente(
     """
     try:
         resultado = await asistente_service.consultar(
-            mensaje=request.mensaje,
+            mensaje=body.mensaje,
             db=db,
             current_user=current_user,
-            historial=request.historial,
-            contexto_manual=request.contexto_manual,
-            override_ia=request.override_ia,
-            consulta_id=request.consulta_id,
+            historial=body.historial,
+            contexto_manual=body.contexto_manual,
+            override_ia=body.override_ia,
+            consulta_id=body.consulta_id,
         )
         return resultado
     except ValueError as e:
@@ -94,8 +97,10 @@ async def consultar_asistente(
 
 
 @router.post("/log-inteligente")
+@limiter.limit("20/minute")
 async def registro_inteligente_nlp(
-    request: ChatRequest,
+    request: Request,
+    body: ChatRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -105,10 +110,10 @@ async def registro_inteligente_nlp(
     """
     try:
         resultado = await asistente_service.registrar_por_nlp(
-            mensaje=request.mensaje,
+            mensaje=body.mensaje,
             db=db,
             current_user=current_user,
-            consulta_id=request.consulta_id,
+            consulta_id=body.consulta_id,
         )
         return resultado
     except ValueError as e:

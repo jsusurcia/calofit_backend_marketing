@@ -4,6 +4,10 @@ from datetime import datetime
 from sqlalchemy.dialects.postgresql import ARRAY
 from app.core.database import Base
 
+# MIGRATION REQUIRED (run once against existing DB):
+# ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+# UPDATE clients SET is_active = TRUE WHERE is_active IS NULL;
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -45,8 +49,9 @@ class Client(Base):
     coach_notes = Column(Text, nullable=True)
     is_strategic_guide_validated = Column(Boolean, default=False)         # ✅ Indica si el Nutri ya validó la estrategia
     profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
-    is_profile_complete = Column(Boolean, default=False)  # 🆕 False hasta que el cliente llene sus datos en el Onboarding
-    
+    is_profile_complete = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=False)  # True solo tras aprobación de pago
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     
@@ -65,6 +70,7 @@ class Client(Base):
     preferencias_ejercicios = relationship("PreferenciaEjercicio", back_populates="cliente", cascade="all, delete-orphan")
 
     comida_registros = relationship("ComidaRegistro", back_populates="cliente", cascade="all, delete-orphan")
+    pagos = relationship("Pago", back_populates="cliente", cascade="all, delete-orphan")
 
     verification_code = Column(String(6), nullable=True)
     code_expires_at = Column(DateTime, nullable=True)
