@@ -23,14 +23,3 @@ class User(Base):
     profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
 
     role_relation = relationship("Role", back_populates="users")
-    
-    clients_as_coach = relationship(
-        "Client", 
-        foreign_keys="Client.assigned_coach_id", 
-        back_populates="coach"
-    )
-    clients_as_nutri = relationship(
-        "Client", 
-        foreign_keys="Client.assigned_nutri_id", 
-        back_populates="nutritionist"
-    )

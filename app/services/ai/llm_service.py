@@ -1,16 +1,26 @@
 """
-Servicio LLM centralizado — wrapper sobre Groq/Llama-3.
+Servicio LLM centralizado — Gemini primario, Groq fallback.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ── Gemini ────────────────────────────────────────────────────────────────
+try:
+    import google.generativeai as genai
+    _gemini_available = True
+except ImportError:
+    genai = None
+    _gemini_available = False
+
+# ── Groq (fallback) ───────────────────────────────────────────────────────
 try:
     from groq import AsyncGroq
     _groq_available = True
@@ -18,73 +28,84 @@ except ImportError:
     AsyncGroq = None
     _groq_available = False
 
-_DEFAULT_MODEL = "llama-3.1-8b-instant"
-_DEFAULT_TEMP   = 0.3
-_DEFAULT_TOKENS = 512
+_GEMINI_MODEL_DEFAULT = "gemini-2.0-flash"
+_GROQ_MODEL_DEFAULT   = "llama-3.1-8b-instant"
+_DEFAULT_TEMP         = 0.3
+_DEFAULT_TOKENS       = 512
 
 
 class LLMService:
     """
-    Wrapper asíncrono sobre la API de Groq (Llama-3).
+    Wrapper asíncrono. Gemini primario, Groq como fallback automático.
 
     Uso:
         llm = LLMService()
         texto = await llm.completar("¿Qué comer en el desayuno?")
-        data  = await llm.generar_json("Dame 3 ingredientes...", schema_hint="lista")
+        data  = await llm.generar_json("Dame 3 ingredientes...")
     """
 
     def __init__(self) -> None:
-        if not _groq_available:
-            raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
-        self._client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        # Gemini
+        self._gemini_model = None
+        if _gemini_available and getattr(settings, "GEMINI_API_KEY", ""):
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            model_name = getattr(settings, "GEMINI_MODEL", _GEMINI_MODEL_DEFAULT)
+            self._gemini_model = genai.GenerativeModel(model_name)
+            logger.info("LLMService: Gemini configurado (%s)", model_name)
+        else:
+            logger.warning("LLMService: Gemini no disponible — revisar GEMINI_API_KEY o instalar google-generativeai")
 
-    # ──────────────────────────────────────────────────────────────────
+        # Groq (fallback)
+        self._groq_client = None
+        if _groq_available and getattr(settings, "GROQ_API_KEY", ""):
+            self._groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+            logger.info("LLMService: Groq configurado como fallback")
+
+        if not self._gemini_model and not self._groq_client:
+            logger.error("LLMService: ningún proveedor LLM disponible. Modo offline.")
+
+    # ──────────────────────────────────────────────────────────────────────
     # API pública
-    # ──────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
 
     async def completar(
         self,
         prompt: str,
         system: str = "",
-        model: str = _DEFAULT_MODEL,
         temperature: float = _DEFAULT_TEMP,
         max_tokens: int = _DEFAULT_TOKENS,
     ) -> str:
-        """Genera texto libre."""
-        messages: List[Dict[str, str]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        """Genera texto libre. Gemini primario, Groq fallback."""
+        # Combinar system + prompt para Gemini (no tiene rol system separado de la misma forma)
+        full_prompt = f"{system}\n\n{prompt}".strip() if system else prompt
 
-        try:
-            resp = await self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return resp.choices[0].message.content or ""
-        except Exception as exc:
-            logger.error("LLMService.completar error: %s", exc)
-            return ""
+        if self._gemini_model:
+            try:
+                response = await self._gemini_model.generate_content_async(
+                    full_prompt,
+                    generation_config={
+                        "max_output_tokens": max_tokens,
+                        "temperature": temperature,
+                    },
+                )
+                return response.text.strip()
+            except Exception as exc:
+                logger.warning("LLMService Gemini error, fallback a Groq: %s", exc)
+
+        return await self._completar_groq(prompt, system=system, temperature=temperature, max_tokens=max_tokens)
 
     async def generar_json(
         self,
         prompt: str,
         system: str = "",
-        model: str = _DEFAULT_MODEL,
         temperature: float = 0.05,
         max_tokens: int = 600,
     ) -> Optional[Any]:
-        """
-        Genera una respuesta y la parsea como JSON.
-        Retorna el objeto parseado, o None si el JSON es inválido.
-        """
+        """Genera respuesta y la parsea como JSON. None si JSON inválido."""
         system_json = (system + "\nResponde SOLO con JSON válido, sin texto adicional.").strip()
         raw = await self.completar(
             prompt=prompt,
             system=system_json,
-            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -94,12 +115,8 @@ class LLMService:
         self,
         mensaje: str,
         opciones: List[str],
-        model: str = _DEFAULT_MODEL,
     ) -> str:
-        """
-        Clasifica el mensaje en una de las opciones dadas.
-        Retorna la opción con mayor probabilidad o la primera opción como fallback.
-        """
+        """Clasifica mensaje en una de las opciones. Retorna primera opción si falla."""
         opciones_str = " | ".join(opciones)
         system = (
             f"Clasifica el mensaje del usuario en UNA de estas categorías: {opciones_str}. "
@@ -117,21 +134,45 @@ class LLMService:
                 return op
         return opciones[0]
 
-    # ──────────────────────────────────────────────────────────────────
-    # Helpers privados
-    # ──────────────────────────────────────────────────────────────────
+    def disponible(self) -> bool:
+        return bool(self._gemini_model or self._groq_client)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Privados
+    # ──────────────────────────────────────────────────────────────────────
+
+    async def _completar_groq(
+        self,
+        prompt: str,
+        system: str = "",
+        temperature: float = _DEFAULT_TEMP,
+        max_tokens: int = _DEFAULT_TOKENS,
+    ) -> str:
+        if not self._groq_client:
+            return ""
+        messages: List[Dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        try:
+            resp = await self._groq_client.chat.completions.create(
+                model=_GROQ_MODEL_DEFAULT,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return resp.choices[0].message.content or ""
+        except Exception as exc:
+            logger.error("LLMService Groq error: %s", exc)
+            return ""
 
     @staticmethod
     def _parsear_json(texto: str) -> Optional[Any]:
-        """Intenta parsear JSON del texto, extrayendo bloques ```json``` si existen."""
-        import re
-        # Extraer bloque ```json ... ```
         bloque = re.search(r"```(?:json)?\s*([\s\S]*?)```", texto)
         candidato = bloque.group(1).strip() if bloque else texto.strip()
         try:
             return json.loads(candidato)
         except json.JSONDecodeError:
-            # Intentar limpiar texto extra antes/después del JSON
             inicio = candidato.find("{") if "{" in candidato else candidato.find("[")
             if inicio != -1:
                 try:

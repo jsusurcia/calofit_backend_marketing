@@ -28,9 +28,11 @@ class Plato(Base):
     nombre_normalizado = Column(String(255), nullable=False, unique=True, index=True)
 
     tipo_plato   = Column(String(50), default="cualquiera")  # desayuno/almuerzo/cena/snack/cualquiera
+    budget_level = Column(String(20), nullable=True)          # economico/moderado/premium
+    meal_style   = Column(String(50), nullable=True)          # peruano/vegetariano/alto_proteina/ligero/express
     preparacion  = Column(JSON, nullable=True)
     nota         = Column(Text, nullable=True)
-    origen       = Column(String(50), default="manual")      # 'manual', 'llm', 'usuario'
+    origen       = Column(String(50), default="manual")       # 'manual', 'llm', 'usuario'
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

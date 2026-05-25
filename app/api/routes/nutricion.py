@@ -1,27 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-# Asegúrate de importar PlanDiario
 from app.models.nutricion import PlanNutricional, PlanDiario
 from app.schemas.nutricion import PlanNutricionalCreate, PlanNutricionalResponse
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 
 from app.api.routes.auth import get_current_staff, get_current_user
-from app.services.ia_service import ia_engine 
+from app.services.ia_service import ia_engine
 
 router = APIRouter()
 
 
 @router.post("/", response_model=PlanNutricionalResponse)
 async def crear_plan_nutricional(
-    plan_data: PlanNutricionalCreate, 
+    plan_data: PlanNutricionalCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_staff)
 ):
-    # 1. Seguridad
-    if current_user.role_name not in ["nutritionist", "admin"]:
-        raise HTTPException(status_code=403, detail="No autorizado")
 
     # 2. IA: Cálculo de Calorías Base
     try:
@@ -67,14 +63,15 @@ async def crear_plan_nutricional(
     # 4. Guardar Plan Maestro (Encabezado)
     nuevo_plan = PlanNutricional(
         client_id=plan_data.client_id,
-        nutricionista_id=current_user.id,
+        nutricionista_id=None,
         genero=plan_data.genero, edad=plan_data.edad,
         peso=plan_data.peso, talla=plan_data.talla,
         nivel_actividad=plan_data.nivel_actividad,
         objetivo=plan_data.objetivo,
         calorias_ia_base=calorias_base,
-        es_contingencia_ia=False, # Plan oficial creado en consulta
-        observaciones=plan_data.observaciones
+        es_contingencia_ia=False,
+        observaciones=plan_data.observaciones,
+        status="aprobado_ia",
     )
 
     try:
@@ -117,74 +114,6 @@ async def crear_plan_nutricional(
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
-
-# =================================================================
-# 🍎 NUEVOS ENDPOINTS: GESTIÓN DE PLANES (FLUJO GYM REAL)
-# =================================================================
-
-@router.get("/planes/pendientes", response_model=list[PlanNutricionalResponse])
-async def listar_planes_pendientes(
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_staff)
-):
-    """
-    Lista los planes en estado 'draft_ia' (generados por IA)
-    que pertenecen a los clientes asignados al nutricionista logueado.
-    """
-    from app.models.client import Client
-    
-    query = db.query(PlanNutricional).filter(PlanNutricional.status == "draft_ia")
-    
-    # Si el usuario es nutricionista, solo ver sus asignados
-    if current_user.role_name == "nutritionist":
-        query = query.join(Client).filter(Client.assigned_nutri_id == current_user.id)
-    
-    return query.all()
-
-@router.put("/planes/{plan_id}/validar")
-async def validar_plan_nutricional(
-    plan_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_staff)
-):
-    """
-    El nutricionista revisa y aprueba el plan generado por la IA.
-    1. Cambia el estado a 'validado'.
-    2. Registra quién y cuándo lo validó.
-    3. Cambia el estado de los detalles diarios a 'oficial'.
-    """
-    plan = db.query(PlanNutricional).filter(PlanNutricional.id == plan_id).first()
-    
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan no encontrado")
-        
-    # Seguridad: Un nutri solo puede validar si el cliente está asignado a él
-    # o si es administrador
-    from app.models.client import Client
-    cliente = db.query(Client).filter(Client.id == plan.client_id).first()
-    
-    if current_user.role_name == "nutritionist" and cliente.assigned_nutri_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para validar planes de este cliente")
-
-    # Actualizar cabecera del plan
-    plan.status = "validado"
-    plan.validated_by_id = current_user.id
-    plan.validated_at = datetime.utcnow()
-    plan.nutricionista_id = current_user.id # Asignar formalmente al plan
-    
-    # Actualizar todos los días del plan a oficial
-    for dia in plan.detalles_diarios:
-        dia.estado = "oficial"
-        dia.validado_nutri = True
-        
-    db.commit()
-    
-    return {
-        "message": "Plan validado exitosamente",
-        "plan_id": plan.id,
-        "validado_por": f"{current_user.first_name} {current_user.last_name_paternal}",
-        "fecha": plan.validated_at.isoformat()
-    }
 
 
 @router.get("/recomendaciones")

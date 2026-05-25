@@ -12,8 +12,7 @@ from app.api.routes.auth import get_current_user
 router = APIRouter()
 
 def check_is_admin(current_user):
-    role = str(getattr(current_user, "role_name", "")).lower()
-    if role not in ["admin", "administrador"]:
+    if str(getattr(current_user, "role_name", "")).lower() != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el administrador puede realizar esta acción"
@@ -99,37 +98,17 @@ async def listar_personal_staff(
             User.id != current_user.id
         ).all()
         
-        # También incluir nutricionistas y entrenadores de forma flexible
-        especialistas = db.query(User).filter(
-            (User.role_name.ilike("%nutri%")) | 
-            (User.role_name.ilike("%coach%")) | 
-            (User.role_name.ilike("%train%")) |
-            (User.role_name.ilike("%entrenador%")),
-            User.id != current_user.id
-        ).all()
-        
-        usuarios_db.extend(especialistas)
-        
         # 3. Mapeo manual a diccionario
         res = []
         for u in usuarios_db:
-            # Calcular carga de trabajo según el rol
-            role_lower = u.role_name.lower()
-            count = 0
-            if "nutri" in role_lower:
-                count = len(u.clients_as_nutri)
-            elif "coach" in role_lower or "train" in role_lower:
-                count = len(u.clients_as_coach)
-                
             res.append({
                 "id": u.id,
                 "first_name": u.first_name if u.first_name else "N/A",
                 "last_name_paternal": u.last_name_paternal if u.last_name_paternal else "",
                 "last_name_maternal": u.last_name_maternal if u.last_name_maternal else "",
                 "email": u.email if u.email else "sin@email.com",
-                "role_name": u.role_name if u.role_name else "staff",
+                "role_name": u.role_name if u.role_name else "admin",
                 "is_active": u.is_active,
-                "pacientes_count": count
             })
         return res
     except Exception as e:
@@ -139,43 +118,6 @@ async def listar_personal_staff(
             detail=f"Error en el servidor al obtener personal: {str(e)}"
         )
 
-@router.put("/clientes/{cliente_id}/asignar")
-async def asignar_especialistas_a_cliente(
-    cliente_id: int,
-    nutri_id: int = None,
-    trainer_id: int = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Vincula a un cliente con un nutricionista y un entrenador específico.
-    """
-    check_is_admin(current_user)
-    
-    cliente = db.query(Client).filter(Client.id == cliente_id).first()
-    if not cliente:
-        raise HTTPException(status_code=404, detail="Cliente no encontrado")
-        
-    if nutri_id:
-        nutri = db.query(User).filter(
-            User.id == nutri_id, 
-            (User.role_name.ilike("%nutri%")) | (User.role_name.ilike("%nutritionist%"))
-        ).first()
-        if not nutri:
-            raise HTTPException(status_code=400, detail="ID de nutricionista no válido o el usuario no tiene rol de nutricionista")
-        cliente.assigned_nutri_id = nutri_id
-        
-    if trainer_id:
-        trainer = db.query(User).filter(
-            User.id == trainer_id, 
-            (User.role_name.ilike("%coach%")) | (User.role_name.ilike("%trainer%")) | (User.role_name.ilike("%entrenador%"))
-        ).first()
-        if not trainer:
-            raise HTTPException(status_code=400, detail="ID de entrenador no válido o el usuario no tiene rol de entrenador")
-        cliente.assigned_coach_id = trainer_id
-        
-    db.commit()
-    return {"message": f"Especialistas asignados correctamente al cliente {cliente.first_name}"}
 
 @router.put("/staff/{user_id}/password")
 async def cambiar_password_staff(
@@ -296,17 +238,6 @@ async def eliminar_personal_staff(
     usuario = db.query(User).filter(User.id == user_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
-
-    # Reasignar clientes si es necesario (opcional)
-    # Por ahora simplemente desvinculamos la clave foránea en Client
-    if usuario.role_name and "nutri" in usuario.role_name.lower():
-        clientes = db.query(Client).filter(Client.assigned_nutri_id == user_id).all()
-        for c in clientes:
-            c.assigned_nutri_id = None
-    elif usuario.role_name and ("coach" in usuario.role_name.lower() or "train" in usuario.role_name.lower()):
-        clientes = db.query(Client).filter(Client.assigned_coach_id == user_id).all()
-        for c in clientes:
-            c.assigned_coach_id = None
 
     nombre_baja = f"{usuario.first_name} ({usuario.email})"
 

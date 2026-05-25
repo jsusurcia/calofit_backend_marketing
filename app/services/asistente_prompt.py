@@ -252,7 +252,7 @@ def construir_prompt_cliente(
             print(f"[Prompt] Error RecomendadorPlatosConfiables: {e}")
 
     # ── Bloque Nutricionista (máxima prioridad) ──
-    nota = getattr(perfil, "nutri_weekly_note", None)
+    nota = None
     bloque_nutri = (
         f"\n⚠️ INSTRUCCIONES OBLIGATORIAS DEL NUTRICIONISTA (NO NEGOCIABLES):\n"
         f"• FOCO: {foco}\n"

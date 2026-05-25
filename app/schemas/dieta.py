@@ -70,8 +70,6 @@ class ClientResponseConDieta(BaseModel):
     height: float
     goal: Optional[str]
     activity_level: Optional[str]
-    assigned_coach_id: Optional[int]
-    assigned_nutri_id: Optional[int]
     workout_type: Optional[str]
     session_duration: Optional[float]
     gender: Optional[str]
@@ -98,8 +96,6 @@ class ClientResponseConDieta(BaseModel):
                 "workout_type": "Fuerza",
                 "session_duration": 1.5,
                 "gender": "M",
-                "assigned_coach_id": 1,
-                "assigned_nutri_id": 2,
                 "dieta_recomendada": {
                     "calorias_diarias": 2100,
                     "proteinas_g": 157,

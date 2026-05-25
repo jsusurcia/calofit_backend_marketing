@@ -32,9 +32,8 @@ def admin_crear_cliente(
     Crea un cliente solo con email + contraseña + firebase_uid.
     El cliente completará su perfil en el Onboarding al primer login.
     """
-    # Permite a Administradores y Nutricionistas crear clientes
-    if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin', 'nutritionist', 'nutricionista']):
-        raise HTTPException(status_code=403, detail="Solo los administradores o nutricionistas pueden crear clientes")
+    if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin']):
+        raise HTTPException(status_code=403, detail="Solo los administradores pueden crear clientes")
 
     existe = db.query(Client).filter(Client.email == data.email).first()
     if existe:
@@ -52,8 +51,6 @@ def admin_crear_cliente(
         activity_level="Sedentario",
         goal="Mantener peso",
         medical_conditions=[],
-        assigned_nutri_id=data.assigned_nutri_id,
-        assigned_coach_id=data.assigned_coach_id,
         is_profile_complete=False,
     )
     db.add(nuevo)
@@ -73,19 +70,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
     if existe:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     
-    # Verificar que assigned_coach_id existe si se proporciona
-    if cliente_data.assigned_coach_id is not None:
-        coach = db.query(User).filter(User.id == cliente_data.assigned_coach_id).first()
-        if not coach:
-            raise HTTPException(status_code=400, detail="El coach asignado no existe")
-    
-    # Verificar que assigned_nutri_id existe si se proporciona
-    if cliente_data.assigned_nutri_id is not None:
-        nutri = db.query(User).filter(User.id == cliente_data.assigned_nutri_id).first()
-        if not nutri:
-            raise HTTPException(status_code=400, detail="El nutricionista asignado no existe")
-    
-    # Crear el nuevo cliente con valores proporcionados o por defecto
     nuevo_cliente = Client(
         first_name=cliente_data.first_name,
         last_name_paternal=cliente_data.last_name_paternal,
@@ -99,8 +83,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
         medical_conditions=cliente_data.medical_conditions or [],
         activity_level=cliente_data.activity_level or 'Sedentario',
         goal=cliente_data.goal or 'Mantener peso',
-        assigned_coach_id=cliente_data.assigned_coach_id,
-        assigned_nutri_id=cliente_data.assigned_nutri_id,
     )
     
     try:
@@ -226,8 +208,6 @@ def obtener_perfil_cliente(
         workout_type=current_user.workout_type or "Cardio",
         session_duration=current_user.session_duration or 1.0,
         medical_conditions=current_user.medical_conditions or [],
-        assigned_coach_id=current_user.assigned_coach_id,
-        assigned_nutri_id=current_user.assigned_nutri_id,
         profile_picture_url=current_user.profile_picture_url,
         is_profile_complete=current_user.is_profile_complete
     )
@@ -487,7 +467,7 @@ def check_checkin_status(
     last_update_date = None
     
     # 1. Chequeamos si validó la estrategia o dejó nota
-    if current_user.is_strategic_guide_validated or current_user.nutri_weekly_note:
+    if current_user.ai_strategic_focus:
         nutri_updates_pending = True
     
     # 2. Buscamos la fecha de la última validación de un plan nutricional
@@ -650,8 +630,6 @@ def recalcular_dieta(
         height=cliente.height or 0.0,
         goal=cliente.goal,
         activity_level=cliente.activity_level,
-        assigned_coach_id=cliente.assigned_coach_id,
-        assigned_nutri_id=cliente.assigned_nutri_id,
         profile_picture_url=cliente.profile_picture_url,
         dieta_recomendada=dieta_schema
     )

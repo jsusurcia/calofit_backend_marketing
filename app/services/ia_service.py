@@ -32,6 +32,13 @@ try:
 except ImportError:
     AsyncGroq = None
 
+try:
+    import google.generativeai as _genai
+    _gemini_available = True
+except ImportError:
+    _genai = None
+    _gemini_available = False
+
 
 from app.core.config import settings
 from app.core.mets_gym import METS_GYM
@@ -76,11 +83,18 @@ class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
 
     def __init__(self):
-        # Groq / Llama-3 (Motor de Lenguaje Natural)
+        # Gemini (primario)
+        self.gemini_model = None
+        if _gemini_available and getattr(settings, "GEMINI_API_KEY", ""):
+            _genai.configure(api_key=settings.GEMINI_API_KEY)
+            _model_name = getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash")
+            self.gemini_model = _genai.GenerativeModel(_model_name)
+            print(f"Gemini configurado: {_model_name}")
+
+        # Groq / Llama-3 (fallback)
         if AsyncGroq and getattr(settings, "GROQ_API_KEY", None):
             _t = float(getattr(settings, "GROQ_TIMEOUT_SEC", 180.0) or 180.0)
             _retries = int(getattr(settings, "GROQ_MAX_RETRIES", 2) or 2)
-            # connect algo generoso en móvil/WiFi inestable; read acorde a prompts grandes.
             self.groq_client = AsyncGroq(
                 api_key=settings.GROQ_API_KEY,
                 timeout=httpx.Timeout(_t, connect=30.0),
@@ -88,8 +102,9 @@ class IAService:
             )
         else:
             self.groq_client = None
-            # Evitar emojis aquí: en Windows cp1252 puede lanzar UnicodeEncodeError en tests/CLI.
-            print("Groq no inicializado - modo offline activo.")
+
+        if not self.gemini_model and not self.groq_client:
+            print("IAService: ningún LLM disponible - modo offline activo.")
 
         # FatSecret (Respaldo de macros)
         self._fs_client_id     = getattr(settings, "FATSECRET_CLIENT_ID", None)
@@ -206,7 +221,7 @@ class IAService:
         """
         if getattr(settings, "CALOFIT_DISABLE_CLASIFICAR_MODO_LLM", False):
             return None
-        if not self.groq_client:
+        if not self.gemini_model and not self.groq_client:
             return None
         m = (mensaje or "").strip()
         if len(m) < 2:
@@ -224,10 +239,23 @@ class IAService:
             "- otro: saludo, gracias, duda general, mensaje ambiguo o no encaja en las otras.\n\n"
             f"Mensaje:\n{m[:600]}"
         )
-        raw = await self._llamar_groq(prompt, max_tokens=48, temp=0.05)
+        raw = await self._llamar_llm(prompt, max_tokens=48, temp=0.05)
         if self.es_fallo_respuesta_llm(raw):
             return None
         return IAService.normalizar_etiqueta_modo_llm(raw)
+
+    async def _llamar_llm(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
+        """Gemini primario, Groq fallback."""
+        if self.gemini_model:
+            try:
+                response = await self.gemini_model.generate_content_async(
+                    prompt,
+                    generation_config={"max_output_tokens": max_tokens, "temperature": temp},
+                )
+                return response.text.strip()
+            except Exception as exc:
+                print(f"[Gemini] error, fallback Groq: {exc}")
+        return await self._llamar_groq(prompt, max_tokens=max_tokens, temp=temp)
 
     async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
         if not self.groq_client: return "[Modo Offline]"
@@ -279,7 +307,7 @@ REGLAS INFLEXIBLES:
 2. Si el cliente tiene Condiciones Médicas Críticas, MENCIONA BREVEMENTE POR QUÉ evitaste ciertos alimentos en base a su patología.
 3. Sé empático pero sumamente riguroso clínicamente.
 {f'COMANDO DEL CLIENTE: {comando_texto}' if comando_texto else ''}"""
-        return await self._llamar_groq(prompt)
+        return await self._llamar_llm(prompt)
 
     async def sugerir_guia_estrategica(self, perfil_usuario: Dict, alertas_salud: Optional[List[Dict]] = None) -> Dict:
         """
@@ -351,7 +379,7 @@ Reglas:
 2) Si hay condiciones médicas, ajusta recomendaciones y restricciones.
 3) No uses markdown, no agregues texto fuera del JSON.
 """
-        raw = await self._llamar_groq(prompt, max_tokens=400, temp=0.3)
+        raw = await self._llamar_llm(prompt, max_tokens=400, temp=0.3)
         try:
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             parsed = json.loads(m.group()) if m else json.loads(raw)
@@ -541,7 +569,7 @@ Reglas:
             "Responde **solo** JSON: "
             '{"alimento": "string", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0, "es_comida": true}'
         )
-        raw = await self._llamar_groq(prompt, max_tokens=200, temp=0.1)
+        raw = await self._llamar_llm(prompt, max_tokens=200, temp=0.1)
         try:
             m = re.search(r'\{.*\}', raw, re.DOTALL)
             parsed = json.loads(m.group()) if m else {}

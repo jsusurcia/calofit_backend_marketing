@@ -168,7 +168,6 @@ async def get_daily_summary(
         "plan_nutricional": plan_objetivo,
         "ai_insight": ai_insight,
         "ai_strategic_focus": cliente.ai_strategic_focus,
-        "is_strategy_validated": cliente.is_strategic_guide_validated
     }
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")

@@ -22,8 +22,6 @@ class ClientCreate(BaseModel):
     workout_type: Optional[str] = Field(default=None, description="Tipo de entrenamiento preferido (para ML)")
     session_duration: Optional[float] = Field(default=None, description="Duración de sesión en horas (para ML)")
     flutter_uid: Optional[str] = None
-    assigned_coach_id: Optional[int] = None
-    assigned_nutri_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -44,8 +42,6 @@ class ClientResponse(BaseModel):
     workout_type: Optional[str] = 'Cardio'
     session_duration: Optional[float] = 1.0
     medical_conditions: List[str] = []
-    assigned_coach_id: Optional[int]
-    assigned_nutri_id: Optional[int]
     profile_picture_url: Optional[str] = None
     is_profile_complete: bool = False
 
@@ -71,21 +67,17 @@ class ClientUpdate(BaseModel):
 
 
 class AdminCreateClient(BaseModel):
-    """Schema para que el Admin/Nutri cree un paciente con credenciales mínimas"""
+    """Schema para que el Admin cree un paciente con credenciales mínimas"""
     email: EmailStr
     password: str = Field(..., min_length=6)
     first_name: Optional[str] = ""
     last_name_paternal: Optional[str] = ""
     last_name_maternal: Optional[str] = ""
-    assigned_nutri_id: Optional[int] = None
-    assigned_coach_id: Optional[int] = None
 
 class ClientExpressCreate(BaseModel):
     """Schema para la creación B2B de un paciente solo usando DNI y Correo."""
     email: EmailStr
     dni: str = Field(..., min_length=7, max_length=15, description="El DNI será usado como clave temporal")
-    assigned_nutri_id: Optional[int] = None
-    assigned_coach_id: Optional[int] = None
 
 class ChangePassword(BaseModel):
     new_password: str = Field(..., min_length=6)
@@ -94,15 +86,13 @@ class ChangePassword(BaseModel):
 # --- 🚀 NUEVOS ESQUEMAS ESTRATÉGICOS (v80.0) ---
 
 class StrategicGuideUpdate(BaseModel):
-    """Para que el nutri guíe a la IA desde el expediente"""
+    """Admin actualiza guía estratégica del cliente"""
     ai_strategic_focus: Optional[str] = None
     recommended_foods: Optional[List[str]] = None
     forbidden_foods: Optional[List[str]] = None
-    medical_conditions: Optional[List[str]] = None  # Nutri también puede ajustar
-    is_strategic_guide_validated: Optional[bool] = None
-    nutri_weekly_note: Optional[str] = None
-    workout_type: Optional[str] = None        # RF feature — nutri puede ajustar
-    session_duration: Optional[float] = None  # RF feature — nutri puede ajustar
+    medical_conditions: Optional[List[str]] = None
+    workout_type: Optional[str] = None
+    session_duration: Optional[float] = None
 
 class ResetPasswordRequest(BaseModel):
     """Para cuando el usuario ingresa su email para recibir el código"""

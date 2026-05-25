@@ -66,7 +66,7 @@ class ContextBuilder:
                 "condiciones_medicas": c.medical_conditions or [],
                 "lista_negra": c.forbidden_foods or [],
                 "lista_blanca": c.recommended_foods or [],
-                "nota_nutri": c.nutri_weekly_note,
+                "nota_nutri": None,
             }
         except Exception as exc:
             logger.warning("ContextBuilder._perfil error: %s", exc)

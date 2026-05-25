@@ -4,10 +4,6 @@ from datetime import datetime
 from sqlalchemy.dialects.postgresql import ARRAY
 from app.core.database import Base
 
-# MIGRATION REQUIRED (run once against existing DB):
-# ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
-# UPDATE clients SET is_active = TRUE WHERE is_active IS NULL;
-
 class Client(Base):
     __tablename__ = "clients"
 
@@ -15,10 +11,9 @@ class Client(Base):
     first_name = Column(String, nullable=True)
     last_name_paternal = Column(String, nullable=True)
     last_name_maternal = Column(String, nullable=True)
-    dni = Column(String, unique=True, index=True, nullable=True) # 🆕 Documento de identidad (DNI)
+    dni = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    is_profile_complete = Column(Boolean, default=True)
     
     planes_nutricionales = relationship(
         "PlanNutricional",
@@ -38,25 +33,14 @@ class Client(Base):
     workout_type = Column(String, nullable=True, default='Cardio')  # 🆕 Tipo de ejercicio preferido (para ML Random Forest)
     session_duration = Column(Float, nullable=True, default=1.0)   # 🆕 Duración de sesión en horas (para ML Random Forest)
     
-    assigned_coach_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    assigned_nutri_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    
-    # --- CAMPOS ESTRATÉGICOS IA (v80.0) ---
-    ai_strategic_focus = Column(String, nullable=True)       # Foco semanal sugerido por Nutri
-    recommended_foods = Column(ARRAY(String), nullable=True, default=[])  # Lista Blanca
-    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])    # Lista Negra
-    nutri_weekly_note = Column(Text, nullable=True)
-    coach_notes = Column(Text, nullable=True)
-    is_strategic_guide_validated = Column(Boolean, default=False)         # ✅ Indica si el Nutri ya validó la estrategia
-    profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
+    recommended_foods = Column(ARRAY(String), nullable=True, default=[])
+    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])
+    ai_strategic_focus = Column(String, nullable=True)
+    profile_picture_url = Column(String, nullable=True)
     is_profile_complete = Column(Boolean, default=False)
-    is_active = Column(Boolean, default=False)  # True solo tras aprobación de pago
+    is_active = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
-
-    
-    coach = relationship("User", foreign_keys="[Client.assigned_coach_id]", back_populates="clients_as_coach")
-    nutritionist = relationship("User", foreign_keys="[Client.assigned_nutri_id]", back_populates="clients_as_nutri")
 
     # Nuevas relaciones para historial
     historial_peso = relationship("HistorialPeso", back_populates="cliente", cascade="all, delete-orphan")

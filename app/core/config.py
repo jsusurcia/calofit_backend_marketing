@@ -22,9 +22,10 @@ class Settings:
             )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    # Timeout HTTP hacia api.groq.com (lectura; prompts largos + 1200 tokens pueden tardar).
     GROQ_TIMEOUT_SEC: float = float(os.getenv("GROQ_TIMEOUT_SEC", "180"))
     GROQ_MAX_RETRIES: int = int(os.getenv("GROQ_MAX_RETRIES", "2"))
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     # Si es true, no se llama a Groq para clasificar modo antes de ``consultar`` (solo heurística local).
     CALOFIT_DISABLE_CLASIFICAR_MODO_LLM: bool = os.getenv(
         "CALOFIT_DISABLE_CLASIFICAR_MODO_LLM", ""

@@ -58,7 +58,7 @@ class AdminIAService:
 
     def _obtener_stats_sistema(self, db: Session):
         total_pacientes = db.query(Client).count()
-        total_nutris = db.query(User).filter(User.role_name == "nutricionista").count()
+        total_nutris = db.query(User).filter(User.role_name == "admin").count()
         
         hoy = get_peru_date()
         alertas_hoy = db.query(AlertaSalud).filter(
