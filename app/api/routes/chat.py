@@ -105,11 +105,17 @@ PLAN ACTUAL DEL USUARIO:
                                     reply=f"¡Listo! He cambiado tu {tipo} del {dia_str.capitalize()} por: {nueva_comida}.",
                                     action_taken="swap"
                                 )
+                        return ChatResponse(reply="No pude encontrar esa comida en tu plan actual para cambiarla. Asegúrate de tener un plan generado y mencionar correctamente el día y la comida.", action_taken=None)
+                    else:
+                        return ChatResponse(reply="No tienes un plan activo o el día mencionado no es válido. Ve a Inicio y genera tu plan primero.", action_taken=None)
             except json.JSONDecodeError:
                 pass
                 
-        # Si no fue una acción, devolver el texto tal cual
-        return ChatResponse(reply=raw_response.strip(), action_taken=None)
+        # Si no fue una acción o no hizo match con JSON limpio, devolver el texto (filtrando markdown jsons)
+        texto_limpio = re.sub(r"```json\n(.*?)\n```", "", raw_response, flags=re.DOTALL).strip()
+        if not texto_limpio:
+            texto_limpio = "Hubo un pequeño error procesando mi respuesta interna. Por favor intenta de nuevo."
+        return ChatResponse(reply=texto_limpio, action_taken=None)
 
     except Exception as e:
         print(f"Error en chat: {e}")

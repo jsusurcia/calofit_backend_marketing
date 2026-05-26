@@ -139,6 +139,77 @@ async def crear_plan_nutricional(
 
 # --- NUEVOS ENDPOINTS MVP GIMNASIOS ---
 
+@router.post("/generar-plan-automatico")
+async def generar_plan_automatico_endpoint(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    from app.models.client import Client
+    from datetime import date
+    
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        
+    # Verificar si ya tiene un plan
+    plan_activo = db.query(PlanNutricional).filter(
+        PlanNutricional.client_id == cliente.id
+    ).first()
+    
+    if plan_activo:
+        raise HTTPException(status_code=400, detail="El cliente ya tiene un plan")
+        
+    edad = (date.today() - cliente.birth_date).days // 365 if cliente.birth_date else 25
+    
+    perfil_usuario = {
+        "age": edad,
+        "gender": cliente.gender or "M",
+        "goal": cliente.goal or "Mantener peso",
+        "activity_level": cliente.activity_level or "Moderado",
+    }
+    
+    # Generar con IA
+    plan_semanal_json = await ia_engine.generar_plan_semanal_porciones(perfil_usuario)
+    if not plan_semanal_json:
+        raise HTTPException(status_code=500, detail="Error al generar plan con IA")
+        
+    plan_maestro = PlanNutricional(
+        client_id=cliente.id,
+        genero=1 if cliente.gender == "M" else 2,
+        edad=edad,
+        peso=cliente.weight or 0,
+        talla=cliente.height or 0,
+        nivel_actividad=1.55,
+        objetivo=cliente.goal or "Mantener peso",
+        es_contingencia_ia=False,
+        calorias_ia_base=2000,
+        status="draft_ia"
+    )
+    db.add(plan_maestro)
+    db.flush()
+    
+    dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+    for i, nombre_dia in enumerate(dias_nombres, 1):
+        comidas_del_dia = plan_semanal_json.get(nombre_dia, {})
+        plan_dia = PlanDiario(
+            plan_id=plan_maestro.id,
+            dia_numero=i,
+            calorias_dia=2000,
+            proteinas_g=100,
+            carbohidratos_g=200,
+            grasas_g=60,
+            comidas=comidas_del_dia,
+            sugerencia_entrenamiento_ia="Entrenamiento sugerido por IA",
+            nota_asistente_ia="Plan generado automáticamente",
+            validado_nutri=False,
+            estado="sugerencia_ia"
+        )
+        db.add(plan_dia)
+        
+    db.commit()
+    return {"success": True, "message": "Plan generado exitosamente"}
+
+
 from pydantic import BaseModel
 class SwapRequest(BaseModel):
     tipo_comida: str # 'desayuno', 'almuerzo', etc
