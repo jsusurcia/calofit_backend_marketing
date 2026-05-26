@@ -21,7 +21,6 @@ class Client(Base):
         cascade="all, delete-orphan",
     )
     
-    flutter_uid = Column(String, unique=True, nullable=True, index=True)  # ✅ UID de Firebase/Flutter para vincular usuario con perfil de salud
     
     birth_date = Column(Date, nullable=True)  # Fecha de nacimiento
     weight = Column(Float)  # Peso actual (kg)

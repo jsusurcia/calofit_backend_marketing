@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .routes import usuarios, nutricion, auth, clientes, asistente, dashboard, admin, balance, alimentos, pagos
+from .routes import usuarios, nutricion, auth, clientes, asistente, dashboard, admin, balance, alimentos, pagos, chat
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administración"
 api_router.include_router(balance.router, prefix="/balance", tags=["Mi Balance"])
 api_router.include_router(alimentos.router, prefix="/alimentos", tags=["Detalle de Alimentos"])
 api_router.include_router(pagos.router, prefix="/pagos", tags=["Pagos"])
+api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])

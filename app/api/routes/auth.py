@@ -124,7 +124,7 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    print(f"🔍 Verificando token...")
+    #print(f"🔍 Verificando token...")
     
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,13 +135,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     try:
         # Decodificar el JWT
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        print(f"🔍 Payload del token: {payload}")
+        #print(f"🔍 Payload del token: {payload}")
         
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")  # ✅ Obtener user_id del token
         user_type: str = payload.get("type")
         
-        print(f"🔍 Email: {email}, User ID: {user_id}, Tipo: {user_type}")
+        #print(f"🔍 Email: {email}, User ID: {user_id}, Tipo: {user_type}")
         
         if email is None or user_type is None or user_id is None:
             print(f"❌ Token incompleto")
@@ -161,7 +161,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         print(f"❌ Usuario no encontrado en BD")
         raise credentials_exception
     
-    print(f"✅ Usuario autenticado: {user.email} (ID: {user.id})")
+    #print(f"✅ Usuario autenticado: {user.email} (ID: {user.id})")
     return user
 
 

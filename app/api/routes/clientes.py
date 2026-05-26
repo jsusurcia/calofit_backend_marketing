@@ -32,7 +32,7 @@ def admin_crear_cliente(
     Crea un cliente solo con email + contraseña + firebase_uid.
     El cliente completará su perfil en el Onboarding al primer login.
     """
-    if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin']):
+    if not (current_staff.role_name and current_staff.role_name.lower() in ['admin', 'superadmin']):
         raise HTTPException(status_code=403, detail="Solo los administradores pueden crear clientes")
 
     existe = db.query(Client).filter(Client.email == data.email).first()
@@ -176,10 +176,10 @@ def obtener_perfil_cliente(
 ):
     """Obtiene el perfil del cliente autenticado"""
     
-    print(f"🔍 GET /clientes/perfil llamado")
-    print(f"🔍 Tipo de usuario: {type(current_user).__name__}")
-    print(f"🔍 ID: {current_user.id}")
-    print(f"🔍 Email: {current_user.email}")
+    #print(f"🔍 GET /clientes/perfil llamado")
+    #print(f"🔍 Tipo de usuario: {type(current_user).__name__}")
+    #print(f"🔍 ID: {current_user.id}")
+    #print(f"🔍 Email: {current_user.email}")
     
     # Verificar que sea un cliente
     if not isinstance(current_user, Client):
@@ -189,9 +189,9 @@ def obtener_perfil_cliente(
             detail="Solo clientes pueden acceder a esta ruta"
         )
     
-    print(f"✅ Cliente: {current_user.first_name} {current_user.last_name_paternal}")
-    print(f"✅ Activity Level: {current_user.activity_level}")
-    print(f"✅ Goal: {current_user.goal}")
+    #print(f"✅ Cliente: {current_user.first_name} {current_user.last_name_paternal}")
+    #print(f"✅ Activity Level: {current_user.activity_level}")
+    #print(f"✅ Goal: {current_user.goal}")
     
     perfil_response = ClientResponse(
         id=current_user.id,

@@ -13,7 +13,7 @@ def initialize_firebase():
             # Si la variable existe, la cargamos (limpiamos posibles comillas extra)
             cred_dict = json.loads(firebase_info.strip("'"))
             cred = credentials.Certificate(cred_dict)
-            print("🔥 Firebase: Inicializado mediante VARIABLE DE ENTORNO")
+            #print("🔥 Firebase: Inicializado mediante VARIABLE DE ENTORNO")
         else:
             # 2. Si no hay variable, usamos tu lógica actual del archivo local
             current_dir = os.path.dirname(__file__)
@@ -23,7 +23,7 @@ def initialize_firebase():
                 raise FileNotFoundError(f"No se encontró el archivo JSON en: {path_to_json}")
                 
             cred = credentials.Certificate(path_to_json)
-            print("🔥 Firebase: Inicializado mediante ARCHIVO LOCAL")
+            #print("🔥 Firebase: Inicializado mediante ARCHIVO LOCAL")
 
         # Evitar inicializar la app más de una vez
         if not firebase_admin._apps:
@@ -61,7 +61,7 @@ def upload_to_firebase(file_bytes: bytes, remote_path: str, content_type: str = 
         # Hacer el archivo público
         blob.make_public()
         
-        print(f"✅ Firebase: Archivo subido a {remote_path}")
+        #print(f"✅ Firebase: Archivo subido a {remote_path}")
         return blob.public_url
         
     except Exception as e:

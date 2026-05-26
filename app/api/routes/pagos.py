@@ -58,9 +58,15 @@ def registrar_pago(
         metodo_pago=data.metodo_pago,
         monto=data.monto,
         concepto=data.concepto,
-        estado="pendiente",
+        estado="aprobado",  # Cambiado de pendiente a aprobado
         registrado_por_id=current_user.id,
+        validado_por_id=current_user.id,
+        fecha_validacion=datetime.utcnow()
     )
+    
+    # Activar al cliente directamente
+    cliente.is_active = True
+    
     db.add(pago)
     db.commit()
     db.refresh(pago)

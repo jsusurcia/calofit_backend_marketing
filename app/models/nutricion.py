@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, ForeignKey, DateTime, String, Boolean
+from sqlalchemy import Column, Integer, Float, ForeignKey, DateTime, String, Boolean, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.core.database import Base
@@ -48,6 +48,9 @@ class PlanDiario(Base):
     proteinas_g = Column(Float, nullable=False)
     carbohidratos_g = Column(Float, nullable=False)
     grasas_g = Column(Float, nullable=False)
+    
+    # --- Estructura Visual del Menú (MVP Gimnasios) ---
+    comidas = Column(JSON, nullable=True) # Guarda el dict de comidas: {"desayuno": "...", "almuerzo": "...", ...}
     
     # --- Campos de Soporte al Coach y Cliente ---
     # Si el Coach está full, el cliente lee esto:

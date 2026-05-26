@@ -6,10 +6,11 @@ from datetime import datetime
 class PlanDiarioResponse(BaseModel):
     id: Optional[int] = None
     dia_numero: int
-    calorias_dia: float
-    proteinas_g: float
-    carbohidratos_g: float
-    grasas_g: float
+    calorias_dia: float = Field(exclude=True)
+    proteinas_g: float = Field(exclude=True)
+    carbohidratos_g: float = Field(exclude=True)
+    grasas_g: float = Field(exclude=True)
+    comidas: Optional[dict] = None
     # Estos campos son los que "hablan" con el cliente y el coach
     sugerencia_entrenamiento_ia: Optional[str] = None
     nota_asistente_ia: Optional[str] = None

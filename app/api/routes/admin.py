@@ -8,8 +8,87 @@ from app.models.auditoria import AuditoriaAdmin
 from app.schemas.user import UserCreate, UserResponse, PasswordUpdate, UserUpdate
 from app.core.security import security
 from app.api.routes.auth import get_current_user
+from app.models.pago import Pago
+from sqlalchemy import func
+from datetime import datetime
 
 router = APIRouter()
+
+@router.get("/dashboard-stats")
+async def get_admin_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_is_admin(current_user)
+    
+    total_clientes = db.query(Client).count()
+    clientes_activos = db.query(Client).filter(Client.is_active == True).count()
+    pagos_pendientes = db.query(Pago).filter(Pago.estado == "pendiente").count()
+    
+    # Calcular ingresos del mes
+    now = datetime.utcnow()
+    # Pagos aprobados en el mes y año actual
+    pagos_mes = db.query(Pago).filter(
+        Pago.estado == "aprobado",
+        func.extract('year', Pago.fecha_pago) == now.year,
+        func.extract('month', Pago.fecha_pago) == now.month
+    ).all()
+    
+    ingresos_mes = sum((p.monto or 0) for p in pagos_mes)
+    
+    return {
+        "total_clientes": total_clientes,
+        "clientes_activos": clientes_activos,
+        "pagos_pendientes": pagos_pendientes,
+        "ingresos_mes": ingresos_mes
+    }
+
+
+
+@router.get("/clientes")
+async def listar_clientes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_is_admin(current_user)
+    clientes = db.query(Client).all()
+    return [
+        {
+            "id": c.id,
+            "nombre": c.first_name or "",
+            "apellido": c.last_name_paternal or "",
+            "email": c.email,
+            "telefono": None,
+            "is_active": c.is_active,
+            "is_profile_complete": c.is_profile_complete,
+            "fecha_creacion": c.created_at.isoformat() if c.created_at else "",
+        }
+        for c in clientes
+    ]
+
+
+@router.delete("/clientes/{cliente_id}")
+async def eliminar_cliente(
+    cliente_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_is_admin(current_user)
+    cliente = db.query(Client).filter(Client.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    cliente.is_active = False
+    db.commit()
+
+    _log_admin_action(
+        db, current_user.id, "CLIENTE_DESACTIVADO",
+        f"Se desactivó la cuenta de {cliente.first_name} {cliente.last_name_paternal} ({cliente.email})",
+        "clients", cliente.id
+    )
+
+    return {"message": f"Cliente {cliente.email} desactivado correctamente", "is_active": False}
+
 
 def check_is_admin(current_user):
     if str(getattr(current_user, "role_name", "")).lower() != "admin":

@@ -11,7 +11,9 @@ Toda la lógica de negocio está delegada a:
 """
 
 import traceback
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+import tempfile
+import os
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -325,5 +327,61 @@ async def eliminar_sugerencia(
     except HTTPException:
         raise
     except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ═══ PART D: Interacción por Voz (MVP) ═══
+
+@router.post("/chat-voz")
+@limiter.limit("20/minute")
+async def chat_voz(
+    request: Request,
+    audio_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Recibe un archivo de audio, lo transcribe con IA (Whisper) y luego 
+    pasa el texto al asistente principal para obtener la respuesta.
+    """
+    from app.services.ia_service import ia_engine
+    
+    if not ia_engine.groq_client:
+        raise HTTPException(status_code=503, detail="Servicio de transcripción no disponible")
+        
+    try:
+        # Guardar audio temporalmente para procesarlo
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp_audio:
+            content = await audio_file.read()
+            tmp_audio.write(content)
+            tmp_path = tmp_audio.name
+            
+        try:
+            # Transcribir con Groq Whisper
+            with open(tmp_path, "rb") as file_obj:
+                transcription = await ia_engine.groq_client.audio.transcriptions.create(
+                    file=(audio_file.filename, file_obj.read()),
+                    model="whisper-large-v3-turbo",
+                    response_format="text",
+                    language="es"
+                )
+        finally:
+            os.remove(tmp_path)
+            
+        # Pasar el texto transcrito al servicio del asistente
+        resultado = await asistente_service.consultar(
+            mensaje=transcription,
+            db=db,
+            current_user=current_user,
+        )
+        
+        # Devolver transcripción y respuesta del bot
+        return {
+            "transcripcion": transcription,
+            "respuesta": resultado
+        }
+        
+    except Exception as e:
+        print(f"❌ ERROR EN /chat-voz: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

@@ -11,6 +11,36 @@ from app.services.ia_service import ia_engine
 
 router = APIRouter()
 
+@router.get("/plan-actual")
+async def obtener_plan_actual(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    from app.models.client import Client
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        
+    plan = db.query(PlanNutricional).filter(
+        PlanNutricional.client_id == cliente.id
+    ).order_by(PlanNutricional.fecha_creacion.desc()).first()
+    
+    if not plan:
+        return {"plan_id": None, "dias": []}
+        
+    dias = db.query(PlanDiario).filter(PlanDiario.plan_id == plan.id).order_by(PlanDiario.dia_numero).all()
+    
+    return {
+        "plan_id": plan.id,
+        "objetivo": plan.objetivo,
+        "dias": [
+            {
+                "dia_numero": d.dia_numero,
+                "comidas": d.comidas
+            }
+            for d in dias
+        ]
+    }
 
 @router.post("/", response_model=PlanNutricionalResponse)
 async def crear_plan_nutricional(
@@ -46,21 +76,7 @@ async def crear_plan_nutricional(
         calorias_base = round(calorias_base, 2)
         print(f"Usando cálculo alternativo: {calorias_base} kcal")
 
-    # 3. IA Avanzada: Recomendaciones con Groq + CBF
-    perfil_usuario = {
-        "edad": plan_data.edad,
-        "genero": plan_data.genero,
-        "peso": plan_data.peso,
-        "talla": plan_data.talla,
-        "objetivo": plan_data.objetivo,
-        "nivel_actividad": plan_data.nivel_actividad
-    }
-    try:
-        recomendacion_groq = ia_engine.recomendar_alimentos_con_groq(perfil_usuario)
-    except Exception as e:
-        recomendacion_groq = "Error al generar recomendación avanzada. Usa plan básico."
-
-    # 4. Guardar Plan Maestro (Encabezado)
+    # 3. Guardar Plan Maestro (Encabezado)
     nuevo_plan = PlanNutricional(
         client_id=plan_data.client_id,
         nutricionista_id=None,
@@ -78,28 +94,36 @@ async def crear_plan_nutricional(
         db.add(nuevo_plan)
         db.flush() 
 
-        # 4. Generación Semanal Inteligente
-        for i in range(1, 8):
-            # Diferenciamos carga: Días 1-5 (Entreno) vs 6-7 (Descanso)
-            factor = 1.1 if i <= 5 else 0.9
-            cals_dia = round(calorias_base * factor, 2)
+        # 4. Generación Semanal Inteligente (Porciones)
+        # Solo generamos de Lunes a Viernes (días 1 a 5)
+        dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+        
+        # Generar JSON de la IA
+        perfil_usuario = {
+            "age": plan_data.edad,
+            "gender": "M" if plan_data.genero == 1 else "F",
+            "goal": plan_data.objetivo,
+            "activity_level": plan_data.nivel_actividad,
+        }
+        
+        plan_semanal_json = await ia_engine.generar_plan_semanal_porciones(perfil_usuario)
+        
+        for i, nombre_dia in enumerate(dias_nombres, 1):
+            cals_dia = round(calorias_base * 1.1, 2) # factor genérico
             
-            # IA genera consejos para el Coach y el Cliente
-            sugerencia_entreno = ia_engine.generar_sugerencia_entrenamiento(plan_data.objetivo, i)
-            nota_ia = "Plan generado automáticamente para dar continuidad a tu progreso."
+            # Obtener comidas del día desde la respuesta de IA, o vacío si falló
+            comidas_del_dia = plan_semanal_json.get(nombre_dia, {})
 
             dia = PlanDiario(
                 plan_id=nuevo_plan.id,
                 dia_numero=i,
                 calorias_dia=cals_dia,
-                # Repartición de macros basada en calorías del día
                 proteinas_g=round((cals_dia * 0.25) / 4, 1),
                 carbohidratos_g=round((cals_dia * 0.50) / 4, 1),
                 grasas_g=round((cals_dia * 0.25) / 9, 1),
-                # Campos de asistencia
-                sugerencia_entrenamiento_ia=sugerencia_entreno,
-                nota_asistente_ia=nota_ia,
-                estado="sugerencia_ia", # Disponible para el cliente al instante
+                comidas=comidas_del_dia, # ← NUEVO CAMPO MVP
+                nota_asistente_ia="Plan por porciones generado automáticamente.",
+                estado="sugerencia_ia",
                 validado_nutri=True
             )
             db.add(dia)
@@ -107,12 +131,69 @@ async def crear_plan_nutricional(
         db.commit()
         db.refresh(nuevo_plan)
         
-        # Devolver el plan completo con sus relaciones cargadas
         return nuevo_plan
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
+
+# --- NUEVOS ENDPOINTS MVP GIMNASIOS ---
+
+from pydantic import BaseModel
+class SwapRequest(BaseModel):
+    tipo_comida: str # 'desayuno', 'almuerzo', etc
+    comida_actual: str
+
+@router.post("/{plan_id}/dia/{dia_numero}/swap")
+async def swap_comida(
+    plan_id: int,
+    dia_numero: int,
+    body: SwapRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Reemplaza una comida específica por una alternativa generada por IA."""
+    dia = db.query(PlanDiario).filter(PlanDiario.plan_id == plan_id, PlanDiario.dia_numero == dia_numero).first()
+    if not dia or not dia.comidas:
+        raise HTTPException(status_code=404, detail="Día o menú no encontrado")
+        
+    plan = db.query(PlanNutricional).filter(PlanNutricional.id == plan_id).first()
+    perfil_usuario = {"goal": plan.objetivo}
+    
+    # Generar alternativa
+    respuesta_ia = await ia_engine.generar_swap_comida(body.comida_actual, body.tipo_comida, perfil_usuario)
+    nueva_comida = respuesta_ia.get("nueva_comida", "Error generando alternativa")
+    
+    # Actualizar DB
+    comidas_dict = dict(dia.comidas)
+    comidas_dict[body.tipo_comida] = nueva_comida
+    dia.comidas = comidas_dict
+    db.commit()
+    
+    return {"success": True, "nueva_comida": nueva_comida, "dia_comidas": dia.comidas}
+
+@router.get("/{plan_id}/compras")
+async def generar_compras(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Genera la lista de compras basada en el menú semanal."""
+    dias = db.query(PlanDiario).filter(PlanDiario.plan_id == plan_id).all()
+    if not dias:
+        raise HTTPException(status_code=404, detail="No hay días en este plan")
+        
+    # Construir el JSON consolidado del menú
+    menu_completo = {}
+    nombres_dias = {1: "Lunes", 2: "Martes", 3: "Miercoles", 4: "Jueves", 5: "Viernes"}
+    
+    for d in dias:
+        if d.comidas:
+            nombre = nombres_dias.get(d.dia_numero, f"Dia_{d.dia_numero}")
+            menu_completo[nombre] = d.comidas
+            
+    lista_json = await ia_engine.generar_lista_compras(menu_completo)
+    return lista_json
 
 
 

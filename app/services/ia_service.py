@@ -617,6 +617,98 @@ Reglas:
             print(f"[Plan inicial] Error: {e}")
             return None
 
+    # ══════════════════════════════════════════════════════════════════
+    # MVP GIMNASIOS: PLANES POR PORCIONES Y LISTAS
+    # ══════════════════════════════════════════════════════════════════
+
+    async def generar_plan_semanal_porciones(self, perfil_usuario: Dict) -> Dict:
+        """Genera un menú de 5 días (Lunes a Viernes) basado en porciones visuales."""
+        prompt = f"""Eres un Nutricionista Deportivo enfocado en el usuario promedio de un gimnasio.
+Tu objetivo es crear un menú de Lunes a Viernes sumamente práctico, usando porciones visuales y fáciles (ej: "1 taza", "1 puñado", "1 plato", "1 unidad", "1 filete") en lugar de gramos o calorías.
+
+PERFIL DEL CLIENTE:
+- Edad: {perfil_usuario.get('age', 25)}
+- Género: {perfil_usuario.get('gender', 'M')}
+- Objetivo: {perfil_usuario.get('goal', 'mantener peso')}
+- Nivel de actividad: {perfil_usuario.get('activity_level', 'Moderado')}
+- Condiciones médicas: {perfil_usuario.get('medical_conditions', [])}
+- Alimentos recomendados: {perfil_usuario.get('recommended_foods', [])}
+- Alimentos prohibidos: {perfil_usuario.get('forbidden_foods', [])}
+
+REGLAS INFLEXIBLES:
+1. NO uses gramos ni calorías. Cero matemáticas.
+2. Comidas sencillas que se puedan preparar rápido (avena, pollo a la plancha, arroz, huevos, etc).
+3. Adapta las porciones al objetivo (ej: más arroz si quiere ganar masa, menos si quiere perder).
+4. El formato de salida debe ser ESTRICTAMENTE JSON VÁLIDO.
+
+Formato JSON requerido:
+{{
+  "Lunes": {{
+    "desayuno": "...", "media_manana": "...", "almuerzo": "...", "cena": "..."
+  }},
+  "Martes": {{
+    "desayuno": "...", "media_manana": "...", "almuerzo": "...", "cena": "..."
+  }},
+  "Miercoles": {{ ... }},
+  "Jueves": {{ ... }},
+  "Viernes": {{ ... }}
+}}
+"""
+        raw = await self._llamar_llm(prompt, max_tokens=1500, temp=0.4)
+        try:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            return json.loads(m.group()) if m else json.loads(raw)
+        except Exception as e:
+            print(f"[Generar Plan Porciones] Error parseando JSON: {e}")
+            return {}
+
+    async def generar_swap_comida(self, comida_actual: str, tipo_comida: str, perfil_usuario: Dict) -> Dict:
+        """Genera una alternativa equivalente para una comida específica."""
+        prompt = f"""Eres un Nutricionista Deportivo.
+El usuario quiere cambiar esta comida ({tipo_comida}): "{comida_actual}".
+
+PERFIL DEL CLIENTE:
+- Objetivo: {perfil_usuario.get('goal', 'mantener peso')}
+- Condiciones médicas: {perfil_usuario.get('medical_conditions', [])}
+- Alimentos prohibidos: {perfil_usuario.get('forbidden_foods', [])}
+
+Genera UNA alternativa en porciones visuales (sin gramos/calorías) que sea equivalente nutricionalmente, diferente a la actual, y fácil de preparar.
+Responde ESTRICTAMENTE con este JSON:
+{{
+  "nueva_comida": "descripción de la nueva comida en porciones"
+}}
+"""
+        raw = await self._llamar_llm(prompt, max_tokens=300, temp=0.5)
+        try:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            return json.loads(m.group()) if m else json.loads(raw)
+        except Exception:
+            return {"nueva_comida": comida_actual}
+
+    async def generar_lista_compras(self, plan_semanal_json: Dict) -> Dict:
+        """Genera una lista de supermercado a partir de un menú semanal en formato JSON."""
+        prompt = f"""Extrae todos los ingredientes necesarios para este menú de 5 días y agrúpalos en una lista de compras inteligente.
+Agrupa por categorías comunes (Proteínas, Carbohidratos, Verduras/Frutas, Lácteos/Huevos, Otros).
+Estima la cantidad total aproximada (ej. "1 docena", "1kg", "2 bolsas") asumiendo que es para 1 sola persona.
+
+Menú:
+{json.dumps(plan_semanal_json, ensure_ascii=False)}
+
+Responde ESTRICTAMENTE en este formato JSON:
+{{
+  "lista_compras": [
+    {{"categoria": "Proteínas", "items": ["1kg de Pechuga de pollo", "500g de Carne molida"]}},
+    {{"categoria": "Verduras", "items": ["1 Lechuga", "5 Tomates"]}}
+  ]
+}}
+"""
+        raw = await self._llamar_llm(prompt, max_tokens=1000, temp=0.3)
+        try:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            return json.loads(m.group()) if m else json.loads(raw)
+        except Exception:
+            return {"lista_compras": []}
+
 # Instancia exportada
 ia_service = IAService()
 ia_engine = ia_service
