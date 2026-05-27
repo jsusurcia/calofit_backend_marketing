@@ -14,10 +14,12 @@ logger = logging.getLogger(__name__)
 
 # ── Gemini ────────────────────────────────────────────────────────────────
 try:
-    import google.generativeai as genai
+    from google import genai                          # ← nuevo SDK
+    from google.genai import types as genai_types    # ← para GenerateContentConfig
     _gemini_available = True
 except ImportError:
     genai = None
+    genai_types = None
     _gemini_available = False
 
 # ── Groq (fallback) ───────────────────────────────────────────────────────
@@ -28,7 +30,7 @@ except ImportError:
     AsyncGroq = None
     _groq_available = False
 
-_GEMINI_MODEL_DEFAULT = "gemini-2.0-flash"
+_GEMINI_MODEL_DEFAULT = "gemini-2.5-flash"
 _GROQ_MODEL_DEFAULT   = "llama-3.1-8b-instant"
 _DEFAULT_TEMP         = 0.3
 _DEFAULT_TOKENS       = 512
@@ -46,14 +48,17 @@ class LLMService:
 
     def __init__(self) -> None:
         # Gemini
-        self._gemini_model = None
+        self._gemini_client = None
+        self._gemini_model_name = _GEMINI_MODEL_DEFAULT
+
         if _gemini_available and getattr(settings, "GEMINI_API_KEY", ""):
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            model_name = getattr(settings, "GEMINI_MODEL", _GEMINI_MODEL_DEFAULT)
-            self._gemini_model = genai.GenerativeModel(model_name)
-            logger.info("LLMService: Gemini configurado (%s)", model_name)
+            self._gemini_client = genai.Client(
+                api_key=settings.GEMINI_API_KEY
+            )
+            self._gemini_model_name = getattr(settings, "GEMINI_MODEL", _GEMINI_MODEL_DEFAULT)
+            logger.info("LLMService: Gemini configurado (%s)", self._gemini_model_name)
         else:
-            logger.warning("LLMService: Gemini no disponible — revisar GEMINI_API_KEY o instalar google-generativeai")
+            logger.warning("LLMService: Gemini no disponible — revisar GEMINI_API_KEY o instalar google-genai")
 
         # Groq (fallback)
         self._groq_client = None
@@ -61,7 +66,7 @@ class LLMService:
             self._groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
             logger.info("LLMService: Groq configurado como fallback")
 
-        if not self._gemini_model and not self._groq_client:
+        if not self._gemini_client and not self._groq_client:
             logger.error("LLMService: ningún proveedor LLM disponible. Modo offline.")
 
     # ──────────────────────────────────────────────────────────────────────
@@ -79,20 +84,22 @@ class LLMService:
         # Combinar system + prompt para Gemini (no tiene rol system separado de la misma forma)
         full_prompt = f"{system}\n\n{prompt}".strip() if system else prompt
 
-        if self._gemini_model:
+        if self._gemini_client:
             try:
-                response = await self._gemini_model.generate_content_async(
-                    full_prompt,
-                    generation_config={
-                        "max_output_tokens": max_tokens,
-                        "temperature": temperature,
-                    },
+                response = await self._gemini_client.aio.models.generate_content(
+                    model=self._gemini_model_name,
+                    contents=full_prompt,
+                    config=genai_types.GenerateContentConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=temperature,
+                    ),
                 )
                 return response.text.strip()
             except Exception as exc:
                 logger.warning("LLMService Gemini error, fallback a Groq: %s", exc)
 
         return await self._completar_groq(prompt, system=system, temperature=temperature, max_tokens=max_tokens)
+
 
     async def generar_json(
         self,
@@ -135,7 +142,7 @@ class LLMService:
         return opciones[0]
 
     def disponible(self) -> bool:
-        return bool(self._gemini_model or self._groq_client)
+        return bool(self._gemini_client or self._groq_client)
 
     # ──────────────────────────────────────────────────────────────────────
     # Privados

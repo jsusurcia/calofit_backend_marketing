@@ -95,8 +95,8 @@ async def crear_plan_nutricional(
         db.flush() 
 
         # 4. Generación Semanal Inteligente (Porciones)
-        # Solo generamos de Lunes a Viernes (días 1 a 5)
-        dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+        # Generamos de Lunes a Domingo (días 1 a 7)
+        dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
         
         # Generar JSON de la IA
         perfil_usuario = {
@@ -188,7 +188,7 @@ async def generar_plan_automatico_endpoint(
     db.add(plan_maestro)
     db.flush()
     
-    dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+    dias_nombres = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
     for i, nombre_dia in enumerate(dias_nombres, 1):
         comidas_del_dia = plan_semanal_json.get(nombre_dia, {})
         plan_dia = PlanDiario(
@@ -256,7 +256,7 @@ async def generar_compras(
         
     # Construir el JSON consolidado del menú
     menu_completo = {}
-    nombres_dias = {1: "Lunes", 2: "Martes", 3: "Miercoles", 4: "Jueves", 5: "Viernes"}
+    nombres_dias = {1: "Lunes", 2: "Martes", 3: "Miercoles", 4: "Jueves", 5: "Viernes", 6: "Sabado", 7: "Domingo"}
     
     for d in dias:
         if d.comidas:

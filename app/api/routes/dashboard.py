@@ -163,6 +163,9 @@ async def get_daily_summary(
         "calorias_quemadas": progreso_hoy.calorias_quemadas if progreso_hoy else 0,
         "resumen": {
             "calorias_consumidas": consumo_actual["calorias"],
+            "proteinas_consumidas": consumo_actual["proteinas"],
+            "carbohidratos_consumidos": consumo_actual["carbohidratos"],
+            "grasas_consumidas": consumo_actual["grasas"],
             "calorias_quemadas": progreso_hoy.calorias_quemadas if progreso_hoy else 0,
         },
         "plan_nutricional": plan_objetivo,

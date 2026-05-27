@@ -209,7 +209,9 @@ def obtener_perfil_cliente(
         session_duration=current_user.session_duration or 1.0,
         medical_conditions=current_user.medical_conditions or [],
         profile_picture_url=current_user.profile_picture_url,
-        is_profile_complete=current_user.is_profile_complete
+        is_profile_complete=current_user.is_profile_complete,
+        meal_reminder_time=current_user.meal_reminder_time
+
     )
     return perfil_response
 

@@ -244,28 +244,35 @@ class IAService:
             return None
         return IAService.normalizar_etiqueta_modo_llm(raw)
 
-    async def _llamar_llm(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
+    async def _llamar_llm(self, prompt: str, max_tokens: int = 800, temp: float = 0.7, json_mode: bool = False) -> str:
         """Gemini primario, Groq fallback."""
         if self.gemini_model:
             try:
+                gen_config = {"temperature": temp}
+                if json_mode:
+                    gen_config["response_mime_type"] = "application/json"
                 response = await self.gemini_model.generate_content_async(
                     prompt,
-                    generation_config={"max_output_tokens": max_tokens, "temperature": temp},
+                    generation_config=gen_config,
                 )
                 return response.text.strip()
             except Exception as exc:
                 print(f"[Gemini] error, fallback Groq: {exc}")
-        return await self._llamar_groq(prompt, max_tokens=max_tokens, temp=temp)
+        return await self._llamar_groq(prompt, max_tokens=max_tokens, temp=temp, json_mode=json_mode)
 
-    async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
+    async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7, json_mode: bool = False) -> str:
         if not self.groq_client: return "[Modo Offline]"
         try:
-            r = await self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temp,
-            )
+            kwargs = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temp,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+                
+            r = await self.groq_client.chat.completions.create(**kwargs)
             return r.choices[0].message.content.strip()
         except Exception as e:
             err = str(e).lower()
@@ -622,9 +629,9 @@ Reglas:
     # ══════════════════════════════════════════════════════════════════
 
     async def generar_plan_semanal_porciones(self, perfil_usuario: Dict) -> Dict:
-        """Genera un menú de 5 días (Lunes a Viernes) basado en porciones visuales."""
+        """Genera un menú de 7 días (Lunes a Domingo) basado en porciones visuales."""
         prompt = f"""Eres un Nutricionista Deportivo enfocado en el usuario promedio de un gimnasio.
-Tu objetivo es crear un menú de Lunes a Viernes sumamente práctico, usando porciones visuales y fáciles (ej: "1 taza", "1 puñado", "1 plato", "1 unidad", "1 filete") en lugar de gramos o calorías.
+Tu objetivo es crear un menú de Lunes a Domingo sumamente práctico, usando porciones visuales y fáciles (ej: "1 taza", "1 puñado", "1 plato", "1 unidad", "1 filete") en lugar de gramos o calorías.
 
 PERFIL DEL CLIENTE:
 - Edad: {perfil_usuario.get('age', 25)}
@@ -637,9 +644,10 @@ PERFIL DEL CLIENTE:
 
 REGLAS INFLEXIBLES:
 1. NO uses gramos ni calorías. Cero matemáticas.
-2. Comidas sencillas que se puedan preparar rápido (avena, pollo a la plancha, arroz, huevos, etc).
-3. Adapta las porciones al objetivo (ej: más arroz si quiere ganar masa, menos si quiere perder).
-4. El formato de salida debe ser ESTRICTAMENTE JSON VÁLIDO.
+2. Comidas sencillas y súper peruanas, típicas de un menú de la calle o de casa (pollo a la plancha con lentejas, arroz con pollo, estofado, ají de gallina fit, saltados, menestras).
+3. Utiliza léxico peruano ESTRICTO: di "palta" (NUNCA aguacate), "camote" (NUNCA batata o boniato), "frejoles", "choclo", "cancha", "papaya", etc.
+4. Adapta las porciones al objetivo (ej: más arroz si quiere ganar masa, menos si quiere perder).
+5. El formato de salida debe ser ESTRICTAMENTE JSON VÁLIDO.
 
 Formato JSON requerido:
 {{
@@ -651,20 +659,24 @@ Formato JSON requerido:
   }},
   "Miercoles": {{ ... }},
   "Jueves": {{ ... }},
-  "Viernes": {{ ... }}
+  "Viernes": {{ ... }},
+  "Sabado": {{ ... }},
+  "Domingo": {{ ... }}
 }}
 """
-        raw = await self._llamar_llm(prompt, max_tokens=1500, temp=0.4)
+        raw = await self._llamar_llm(prompt, max_tokens=1500, temp=0.4, json_mode=True)
         try:
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            return json.loads(m.group()) if m else json.loads(raw)
+            m = re.search(r"\{[\s\S]*\}", raw)
+            json_str = m.group() if m else raw
+            json_str = re.sub(r"```json|```", "", json_str).strip()
+            return json.loads(json_str)
         except Exception as e:
             print(f"[Generar Plan Porciones] Error parseando JSON: {e}")
             return {}
 
     async def generar_swap_comida(self, comida_actual: str, tipo_comida: str, perfil_usuario: Dict) -> Dict:
         """Genera una alternativa equivalente para una comida específica."""
-        prompt = f"""Eres un Nutricionista Deportivo.
+        prompt = f"""Eres un Nutricionista Deportivo de PERÚ.
 El usuario quiere cambiar esta comida ({tipo_comida}): "{comida_actual}".
 
 PERFIL DEL CLIENTE:
@@ -672,7 +684,8 @@ PERFIL DEL CLIENTE:
 - Condiciones médicas: {perfil_usuario.get('medical_conditions', [])}
 - Alimentos prohibidos: {perfil_usuario.get('forbidden_foods', [])}
 
-Genera UNA alternativa en porciones visuales (sin gramos/calorías) que sea equivalente nutricionalmente, diferente a la actual, y fácil de preparar.
+Genera UNA alternativa en porciones visuales (sin gramos/calorías) que sea equivalente nutricionalmente, diferente a la actual, y que sea una típica comida peruana fácil de preparar o de encontrar en un menú.
+Usa léxico peruano estricto: "palta" (NUNCA aguacate), "camote" (no batata/boniato), "choclo", "arroz", "frejoles", etc.
 Responde ESTRICTAMENTE con este JSON:
 {{
   "nueva_comida": "descripción de la nueva comida en porciones"
@@ -687,7 +700,7 @@ Responde ESTRICTAMENTE con este JSON:
 
     async def generar_lista_compras(self, plan_semanal_json: Dict) -> Dict:
         """Genera una lista de supermercado a partir de un menú semanal en formato JSON."""
-        prompt = f"""Extrae todos los ingredientes necesarios para este menú de 5 días y agrúpalos en una lista de compras inteligente.
+        prompt = f"""Extrae todos los ingredientes necesarios para este menú de 7 días y agrúpalos en una lista de compras inteligente.
 Agrupa por categorías comunes (Proteínas, Carbohidratos, Verduras/Frutas, Lácteos/Huevos, Otros).
 Estima la cantidad total aproximada (ej. "1 docena", "1kg", "2 bolsas") asumiendo que es para 1 sola persona.
 

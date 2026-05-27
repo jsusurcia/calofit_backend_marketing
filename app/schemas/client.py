@@ -44,6 +44,7 @@ class ClientResponse(BaseModel):
     medical_conditions: List[str] = []
     profile_picture_url: Optional[str] = None
     is_profile_complete: bool = False
+    meal_reminder_time: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -64,6 +65,7 @@ class ClientUpdate(BaseModel):
     session_duration: Optional[float] = None
     profile_picture_url: Optional[str] = None
     is_profile_complete: Optional[bool] = None
+    meal_reminder_time: Optional[str] = None
 
 
 class AdminCreateClient(BaseModel):

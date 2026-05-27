@@ -261,3 +261,59 @@ class EmailService:
         except requests.exceptions.RequestException as e:
             print(f"Error crítico enviando código vía Brevo: {e}")
             return None
+
+    @staticmethod
+    def send_meal_reminder_email(email_to: str, client_name: str):
+        """Envía un recordatorio al cliente para que registre sus comidas."""
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import os
+
+        gmail_user = os.getenv("GMAIL_SENDER")
+        gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+
+        if not gmail_user or not gmail_password:
+            print("Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD para el recordatorio de comidas")
+            return None
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "¡Es hora de registrar tus comidas en CaloFit!"
+        msg["From"] = f"CaloFit <{gmail_user}>"
+        msg["To"] = email_to
+
+        html_body = f"""
+        <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h1 style="color: #4CAF50; margin: 0; font-size: 28px;">CaloFit</h1>
+                <p style="color: #666; margin-top: 5px; font-size: 14px;">Tu asistente nutricional inteligente</p>
+            </div>
+            
+            <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola, <b>{client_name}</b>!</p>
+            <p style="color: #333; font-size: 15px; line-height: 1.5;">
+                Este es tu recordatorio diario para registrar tus comidas de hoy. Hacerlo te ayuda a mantener el control de tus calorías y macros, ¡acelerando tus resultados!
+            </p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="http://localhost:4200/cliente/dashboard" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Ir a mi Dashboard</a>
+            </div>
+            
+            <p style="color: #666; font-size: 12px; line-height: 1.5; text-align: center;">
+                Recibes este correo porque configuraste un recordatorio diario en tu perfil. Puedes cambiar la hora o desactivarlo desde la aplicación.
+            </p>
+        </div>
+        """
+        
+        parte_html = MIMEText(html_body, "html")
+        msg.attach(parte_html)
+
+        try:
+            server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+            server.login(gmail_user, gmail_password)
+            server.sendmail(gmail_user, email_to, msg.as_string())
+            server.quit()
+            print(f"Recordatorio de comidas enviado a {email_to}")
+            return True
+        except Exception as e:
+            print(f"Error enviando recordatorio de comidas: {e}")
+            return None

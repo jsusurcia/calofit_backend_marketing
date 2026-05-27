@@ -31,6 +31,7 @@ class Client(Base):
     goal = Column(String, nullable=True, default='Mantener peso')  # Objetivo principal: Perder peso, Mantener peso, Ganar masa
     workout_type = Column(String, nullable=True, default='Cardio')  # 🆕 Tipo de ejercicio preferido (para ML Random Forest)
     session_duration = Column(Float, nullable=True, default=1.0)   # 🆕 Duración de sesión en horas (para ML Random Forest)
+    meal_reminder_time = Column(String, nullable=True) # Hora para recordar el registro de comidas (ej. "20:00")
     
     recommended_foods = Column(ARRAY(String), nullable=True, default=[])
     forbidden_foods = Column(ARRAY(String), nullable=True, default=[])
