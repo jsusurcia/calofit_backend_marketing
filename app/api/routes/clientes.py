@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.models.client import Client
 from app.models.user import User
-from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse, ChangePassword, AdminCreateClient
+from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse, ChangePassword, AdminCreateClient, ClientDatosUpdate
 from app.schemas.dieta import ClientResponseConDieta, RecomendacionDietaCompleta
 from app.core.security import security
 from app.api.routes.auth import get_current_user, get_current_staff
@@ -411,6 +411,98 @@ def actualizar_perfil_cliente(
 
 
 
+
+
+@router.patch("/datos")
+def actualizar_datos_cliente(
+    datos: ClientDatosUpdate,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Actualiza los datos físicos y de salud del cliente autenticado."""
+    if not isinstance(current_user, Client):
+        raise HTTPException(status_code=403, detail="Solo clientes pueden usar este endpoint")
+
+    cliente = db.query(Client).filter(Client.id == current_user.id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    update_data = datos.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No se proporcionaron campos para actualizar")
+
+    _PLAN_TRIGGER_FIELDS = {"activity_level", "goal"}
+    for field, value in update_data.items():
+        setattr(cliente, field, value)
+
+    try:
+        db.commit()
+        db.refresh(cliente)
+
+        plan_recalculado = False
+        if _PLAN_TRIGGER_FIELDS & set(update_data.keys()):
+            try:
+                from app.models.nutricion import PlanNutricional, PlanDiario
+
+                edad = 30
+                if cliente.birth_date:
+                    hoy = date.today()
+                    edad = hoy.year - cliente.birth_date.year - (
+                        (hoy.month, hoy.day) < (cliente.birth_date.month, cliente.birth_date.day)
+                    )
+
+                rec = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
+                    peso=float(cliente.weight or 70),
+                    altura=float(cliente.height or 170),
+                    edad=edad,
+                    genero=cliente.gender or "M",
+                    nivel_actividad=cliente.activity_level or "Moderado",
+                    objetivo=cliente.goal or "Mantener peso",
+                )
+
+                plan_activo = (
+                    db.query(PlanNutricional)
+                    .filter(PlanNutricional.client_id == cliente.id)
+                    .order_by(PlanNutricional.fecha_creacion.desc())
+                    .first()
+                )
+                if plan_activo:
+                    for pd in db.query(PlanDiario).filter(PlanDiario.plan_id == plan_activo.id).all():
+                        pd.calorias_dia = round(rec.calorias_diarias)
+                        pd.proteinas_g = rec.proteinas_g
+                        pd.carbohidratos_g = rec.carbohidratos_g
+                        pd.grasas_g = rec.grasas_g
+                    db.commit()
+                    plan_recalculado = True
+            except Exception as _e:
+                print(f"⚠️ Recalculo de plan falló (no crítico): {_e}")
+
+        return {
+            "message": "Datos actualizados exitosamente",
+            "cliente": ClientResponse(
+                id=cliente.id,
+                first_name=cliente.first_name or "",
+                last_name_paternal=cliente.last_name_paternal or "",
+                last_name_maternal=cliente.last_name_maternal or "",
+                email=cliente.email,
+                birth_date=cliente.birth_date,
+                weight=cliente.weight or 0.0,
+                height=cliente.height or 0.0,
+                gender=cliente.gender or "M",
+                activity_level=cliente.activity_level or "Sedentario",
+                goal=cliente.goal or "Mantener peso",
+                workout_type=cliente.workout_type or "Cardio",
+                session_duration=cliente.session_duration or 1.0,
+                medical_conditions=cliente.medical_conditions or [],
+                profile_picture_url=cliente.profile_picture_url,
+                is_profile_complete=cliente.is_profile_complete,
+                meal_reminder_time=cliente.meal_reminder_time,
+            ),
+            "plan_recalculado": plan_recalculado,
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
 # ✅ Check-in Mensual

@@ -96,6 +96,35 @@ class StrategicGuideUpdate(BaseModel):
     workout_type: Optional[str] = None
     session_duration: Optional[float] = None
 
+ACTIVITY_LEVELS = {"Sedentario", "Ligero", "Moderado", "Intenso", "Muy intenso"}
+GOALS = {"Perder peso", "Mantener peso", "Ganar masa"}
+
+class ClientDatosUpdate(BaseModel):
+    """Actualización de datos físicos y de salud del cliente."""
+    weight: Optional[float] = Field(default=None, gt=0, description="Peso en kilogramos")
+    height: Optional[float] = Field(default=None, gt=0, description="Altura en centímetros")
+    activity_level: Optional[str] = Field(default=None, description="Nivel de actividad física")
+    goal: Optional[str] = Field(default=None, description="Objetivo de salud")
+    medical_conditions: Optional[List[str]] = Field(default=None, description="Lista de condiciones médicas")
+
+    @field_validator("activity_level")
+    @classmethod
+    def validate_activity_level(cls, v):
+        if v is not None and v not in ACTIVITY_LEVELS:
+            raise ValueError(f"Nivel de actividad inválido. Opciones: {', '.join(sorted(ACTIVITY_LEVELS))}")
+        return v
+
+    @field_validator("goal")
+    @classmethod
+    def validate_goal(cls, v):
+        if v is not None and v not in GOALS:
+            raise ValueError(f"Objetivo inválido. Opciones: {', '.join(sorted(GOALS))}")
+        return v
+
+    class Config:
+        from_attributes = True
+
+
 class ResetPasswordRequest(BaseModel):
     """Para cuando el usuario ingresa su email para recibir el código"""
     email: EmailStr
