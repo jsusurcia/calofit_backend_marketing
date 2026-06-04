@@ -378,7 +378,7 @@ class EmailService:
             </p>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="http://localhost:4200/cliente/dashboard" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Ir a mi Dashboard</a>
+                <a href="https://calofit-frontend-production.up.railway.app/cliente/dashboard" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Ir a mi Dashboard</a>
             </div>
             
             <p style="color: #666; font-size: 12px; line-height: 1.5; text-align: center;">

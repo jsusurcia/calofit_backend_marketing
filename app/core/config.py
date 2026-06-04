@@ -9,7 +9,7 @@ _WEAK_DEFAULTS = {"TU_CLAVE_PARA_LEY_29733", "changeme", "secret", ""}
 
 class Settings:
     PROJECT_NAME: str = "CaloFit - Gimnasio World Light"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:leomeflo09@localhost/BD_Calofit")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "TU_CLAVE_PARA_LEY_29733")
 
     def __init__(self) -> None:
