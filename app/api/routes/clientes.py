@@ -68,6 +68,17 @@ def admin_crear_cliente(
     db.add(pago_pendiente)
     db.commit()
     db.refresh(nuevo)
+
+    admin_name = f"{current_staff.first_name} {current_staff.last_name_paternal}".strip() or current_staff.email
+    client_name = data.first_name or ""
+    EmailService.send_bienvenida_pago_pendiente_brevo(
+        email_to=nuevo.email,
+        client_name=client_name,
+        password_temporal=data.password,
+        admin_name=admin_name,
+        pago_id=pago_pendiente.id,
+    )
+
     return {"id": nuevo.id, "email": nuevo.email, "is_profile_complete": False, "pago_id": pago_pendiente.id}
 
 

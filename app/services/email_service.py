@@ -263,6 +263,89 @@ class EmailService:
             return None
 
     @staticmethod
+    def send_bienvenida_pago_pendiente_brevo(
+        email_to: str,
+        client_name: str,
+        password_temporal: str,
+        admin_name: str,
+        pago_id: int,
+    ):
+        """Notifica al cliente recién creado que tiene un pago de membresía pendiente."""
+        import requests
+        import os
+
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
+
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
+            return None
+
+        saludo = f"¡Hola, {client_name}!" if client_name else "¡Hola!"
+
+        html_body = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: auto; border: 1px solid #eee; padding: 28px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.06);">
+            <div style="text-align: center; margin-bottom: 24px;">
+                <h1 style="color: #1E88E5; margin: 0; font-size: 30px;">CaloFit</h1>
+                <p style="color: #888; margin-top: 6px; font-size: 13px;">Tu camino a una vida saludable</p>
+            </div>
+
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">{saludo}</p>
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+                <b>{admin_name}</b> acaba de crear tu cuenta en CaloFit. Ya puedes ingresar a la aplicación con las siguientes credenciales:
+            </p>
+
+            <div style="background: #F1F5F9; border-left: 4px solid #1E88E5; padding: 16px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0 0 8px 0; color: #555; font-size: 12px; text-transform: uppercase; font-weight: bold;">Tus credenciales de acceso</p>
+                <p style="margin: 0 0 6px 0; font-size: 14px;"><strong>Correo:</strong> {email_to}</p>
+                <p style="margin: 0; font-size: 14px;"><strong>Contraseña temporal:</strong> {password_temporal}</p>
+            </div>
+
+            <div style="background: #FFF8E1; border-left: 4px solid #FFA000; padding: 16px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0 0 6px 0; color: #555; font-size: 12px; text-transform: uppercase; font-weight: bold;">Pago pendiente</p>
+                <p style="margin: 0; color: #333; font-size: 14px; line-height: 1.5;">
+                    Tienes un pago de membresía pendiente (ID: <b>#{pago_id}</b>). Para activar tu cuenta por completo, sube tu comprobante de pago desde la aplicación.
+                </p>
+            </div>
+
+            <p style="color: #333; font-size: 14px; line-height: 1.6;">
+                Al iniciar sesión por primera vez, te pediremos completar tu perfil y cambiar tu contraseña por seguridad.
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <p style="font-size: 11px; color: #aaa; text-align: center; margin: 0;">
+                Mensaje automático de CaloFit &mdash; Por favor no respondas a este correo.
+            </p>
+        </div>
+        """
+
+        payload = {
+            "sender": {"name": "CaloFit", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": "¡Bienvenido a CaloFit! Tienes un pago pendiente",
+            "htmlContent": html_body,
+        }
+
+        try:
+            response = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "accept": "application/json",
+                    "api-key": api_key,
+                    "content-type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            print(f"Correo de bienvenida + pago pendiente enviado a {email_to} vía Brevo")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error enviando correo de pago pendiente vía Brevo: {e}")
+            if hasattr(e, "response") and e.response is not None:
+                print(f"Detalle Brevo: {e.response.text}")
+            return None
+
+    @staticmethod
     def send_meal_reminder_email(email_to: str, client_name: str):
         """Envía un recordatorio al cliente para que registre sus comidas."""
         import smtplib
