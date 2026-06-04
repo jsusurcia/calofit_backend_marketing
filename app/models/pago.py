@@ -12,8 +12,8 @@ class Pago(Base):
     registrado_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     validado_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    # "yape" | "efectivo"
-    metodo_pago = Column(String(20), nullable=False)
+    # "yape" | "efectivo" | None (pendiente de definir)
+    metodo_pago = Column(String(20), nullable=True)
     # "pendiente" | "aprobado" | "rechazado"
     estado = Column(String(20), nullable=False, default="pendiente")
 

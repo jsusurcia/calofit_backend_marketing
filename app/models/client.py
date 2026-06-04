@@ -56,5 +56,7 @@ class Client(Base):
     comida_registros = relationship("ComidaRegistro", back_populates="cliente", cascade="all, delete-orphan")
     pagos = relationship("Pago", back_populates="cliente", cascade="all, delete-orphan")
 
+    phone = Column(String(20), nullable=True)
+
     verification_code = Column(String(6), nullable=True)
     code_expires_at = Column(DateTime, nullable=True)

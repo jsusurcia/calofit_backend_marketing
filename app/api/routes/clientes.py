@@ -16,6 +16,7 @@ from app.services.email_service import EmailService
 import random
 from datetime import datetime, timedelta
 from app.core.firebase import auth as firebase_admin_auth
+from app.models.pago import Pago
 
 
 router = APIRouter()
@@ -52,11 +53,22 @@ def admin_crear_cliente(
         goal="Mantener peso",
         medical_conditions=[],
         is_profile_complete=False,
+        is_active=False,
     )
     db.add(nuevo)
+    db.flush()
+
+    pago_pendiente = Pago(
+        client_id=nuevo.id,
+        metodo_pago=None,
+        estado="pendiente",
+        concepto="Membresía",
+        registrado_por_id=current_staff.id,
+    )
+    db.add(pago_pendiente)
     db.commit()
     db.refresh(nuevo)
-    return {"id": nuevo.id, "email": nuevo.email, "is_profile_complete": False}
+    return {"id": nuevo.id, "email": nuevo.email, "is_profile_complete": False, "pago_id": pago_pendiente.id}
 
 
 

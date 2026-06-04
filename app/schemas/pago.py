@@ -14,10 +14,14 @@ class PagoRechazar(BaseModel):
     notas_admin: Optional[str] = None
 
 
+class PagoAprobar(BaseModel):
+    metodo_pago: str = Field(..., pattern="^(yape|efectivo)$")
+
+
 class PagoResponse(BaseModel):
     id: int
     client_id: int
-    metodo_pago: str
+    metodo_pago: Optional[str]
     estado: str
     monto: Optional[float]
     concepto: Optional[str]
@@ -38,7 +42,8 @@ class PagoListItem(BaseModel):
     client_id: int
     client_nombre: str
     client_email: str
-    metodo_pago: str
+    client_phone: Optional[str]
+    metodo_pago: Optional[str]
     estado: str
     monto: Optional[float]
     concepto: Optional[str]

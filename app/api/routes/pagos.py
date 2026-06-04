@@ -1,15 +1,17 @@
 import os
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 from app.core.database import get_db
 from app.models.client import Client
 from app.models.pago import Pago
 from app.models.user import User
 from app.api.routes.auth import get_current_user, get_current_staff
-from app.schemas.pago import PagoCreate, PagoRechazar, PagoResponse, PagoListItem
+from app.schemas.pago import PagoCreate, PagoRechazar, PagoResponse, PagoListItem, PagoAprobar
+from typing import Optional
 
 router = APIRouter()
 
@@ -32,6 +34,34 @@ def _check_staff(current_user):
     if not isinstance(current_user, User):
         raise HTTPException(status_code=403, detail="Solo staff puede realizar esta acción")
     return current_user
+
+
+def _pago_to_list_item(p: Pago, cliente: Client | None) -> PagoListItem:
+    nombre = f"{cliente.first_name or ''} {cliente.last_name_paternal or ''}".strip() if cliente else "—"
+    return PagoListItem(
+        id=p.id,
+        client_id=p.client_id,
+        client_nombre=nombre or (cliente.email if cliente else "—"),
+        client_email=cliente.email if cliente else "—",
+        client_phone=cliente.phone if cliente else None,
+        metodo_pago=p.metodo_pago,
+        estado=p.estado,
+        monto=p.monto,
+        concepto=p.concepto,
+        comprobante_url=p.comprobante_url,
+        fecha_pago=p.fecha_pago,
+    )
+
+
+def _build_pago_list(db: Session, estado: str | None = None) -> list[PagoListItem]:
+    query = db.query(Pago)
+    if estado:
+        query = query.filter(Pago.estado == estado)
+    pagos = query.order_by(Pago.created_at.desc()).all()
+    client_ids = list({p.client_id for p in pagos})
+    clientes = db.query(Client).filter(Client.id.in_(client_ids)).all() if client_ids else []
+    cliente_map = {c.id: c for c in clientes}
+    return [_pago_to_list_item(p, cliente_map.get(p.client_id)) for p in pagos]
 
 
 def _check_admin(current_user):
@@ -106,31 +136,52 @@ def listar_pendientes(
     current_user=Depends(get_current_staff),
 ):
     """Admin/Staff: lista todos los pagos en estado pendiente."""
-    pagos = (
-        db.query(Pago)
-        .filter(Pago.estado == "pendiente")
-        .order_by(Pago.created_at.desc())
-        .all()
-    )
-    result = []
-    for p in pagos:
-        cliente = db.query(Client).filter(Client.id == p.client_id).first()
-        nombre = f"{cliente.first_name or ''} {cliente.last_name_paternal or ''}".strip() if cliente else "—"
-        result.append(
-            PagoListItem(
-                id=p.id,
-                client_id=p.client_id,
-                client_nombre=nombre or cliente.email if cliente else "—",
-                client_email=cliente.email if cliente else "—",
-                metodo_pago=p.metodo_pago,
-                estado=p.estado,
-                monto=p.monto,
-                concepto=p.concepto,
-                comprobante_url=p.comprobante_url,
-                fecha_pago=p.fecha_pago,
+    return _build_pago_list(db, estado="pendiente")
+
+
+@router.get("/lista", response_model=list[PagoListItem])
+def listar_pagos(
+    estado: Optional[str] = Query(None, description="pendiente | aprobado | rechazado"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_staff),
+):
+    """Admin/Staff: lista todos los pagos, con filtro opcional por estado."""
+    return _build_pago_list(db, estado=estado)
+
+
+@router.get("/buscar", response_model=list[PagoListItem])
+def buscar_pagos(
+    q: str = Query(..., min_length=1, description="Nombre, apellido, correo o celular del cliente"),
+    estado: Optional[str] = Query(None, description="pendiente | aprobado | rechazado"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_staff),
+):
+    """Admin/Staff: busca pagos por nombre, apellido, correo o celular del cliente."""
+    term = f"%{q.strip().lower()}%"
+    clientes = (
+        db.query(Client)
+        .filter(
+            or_(
+                func.lower(Client.first_name).like(term),
+                func.lower(Client.last_name_paternal).like(term),
+                func.lower(Client.last_name_maternal).like(term),
+                func.lower(Client.email).like(term),
+                Client.phone.like(term),
             )
         )
-    return result
+        .all()
+    )
+    if not clientes:
+        return []
+
+    client_ids = [c.id for c in clientes]
+    query = db.query(Pago).filter(Pago.client_id.in_(client_ids))
+    if estado:
+        query = query.filter(Pago.estado == estado)
+    pagos = query.order_by(Pago.created_at.desc()).all()
+
+    cliente_map = {c.id: c for c in clientes}
+    return [_pago_to_list_item(p, cliente_map.get(p.client_id)) for p in pagos]
 
 
 @router.get("/cliente/{client_id}", response_model=list[PagoResponse])
@@ -163,6 +214,7 @@ def detalle_pago(
 @router.put("/{pago_id}/aprobar", response_model=PagoResponse)
 def aprobar_pago(
     pago_id: int,
+    data: PagoAprobar,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_staff),
 ):
@@ -176,6 +228,8 @@ def aprobar_pago(
         raise HTTPException(status_code=400, detail=f"El pago ya está en estado '{pago.estado}'")
 
     pago.estado = "aprobado"
+    pago.metodo_pago = data.metodo_pago
+    pago.monto = 15.0
     pago.validado_por_id = current_user.id
     pago.fecha_validacion = datetime.utcnow()
 

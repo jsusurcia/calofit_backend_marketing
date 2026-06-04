@@ -45,6 +45,7 @@ class ClientResponse(BaseModel):
     profile_picture_url: Optional[str] = None
     is_profile_complete: bool = False
     meal_reminder_time: Optional[str] = None
+    phone: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -66,6 +67,7 @@ class ClientUpdate(BaseModel):
     profile_picture_url: Optional[str] = None
     is_profile_complete: Optional[bool] = None
     meal_reminder_time: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class AdminCreateClient(BaseModel):
