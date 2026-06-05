@@ -26,6 +26,10 @@ class EmailService:
                     <p style="font-size: 12px; color: #777; margin-top: 20px;">
                         Este código expirará en 15 minutos. Si no solicitaste este cambio, ignora este correo.
                     </p>
+                    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                    <div style="text-align: center; margin: 16px 0;">
+                        <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+                    </div>
                 </div>
                 """
             }
@@ -62,6 +66,9 @@ class EmailService:
                     <p style="color: #333; font-size: 15px; line-height: 1.5;">
                         Descarga la aplicación de CaloFit e ingresa con estos datos. Cuando inicies sesión por primera vez, <b>te pediremos completar tu perfil y que cambies tu contraseña</b> por motivos de seguridad.
                     </p>
+                    <div style="text-align: center; margin: 20px 0;">
+                        <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+                    </div>
                     <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
                     <p style="font-size: 12px; color: #999; text-align: center; margin: 0;">
                         Este es un mensaje automático del sistema CaloFit. Por favor no respondas a este correo.
@@ -120,9 +127,13 @@ class EmailService:
             <p style="color: #333; font-size: 15px; line-height: 1.5;">
                 Descarga la aplicación de CaloFit e ingresa con estos datos. Cuando inicies sesión por primera vez, <b>te pediremos completar tu perfil y que cambies tu contraseña</b> por motivos de seguridad.
             </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+            </div>
         </div>
         """
-        
+
         parte_html = MIMEText(html_body, "html")
         msg.attach(parte_html)
 
@@ -182,6 +193,10 @@ class EmailService:
             <p style="color: #333; font-size: 15px; line-height: 1.5;">
                 Ingresa con estos datos en la aplicación. Cuando inicies sesión por primera vez, <b>te pediremos completar tu perfil y que cambies tu contraseña</b> por motivos de seguridad.
             </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+            </div>
         </div>
         """
 
@@ -241,6 +256,10 @@ class EmailService:
             <p style="color: #666; font-size: 12px; line-height: 1.5;">
                 Este código expirará en 15 minutos. Si no solicitaste este cambio, por favor ignora este correo.
             </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+            </div>
         </div>
         """
 
@@ -309,6 +328,10 @@ class EmailService:
                 Al iniciar sesión por primera vez, te pediremos completar tu perfil y cambiar tu contraseña por seguridad.
             </p>
 
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+            </div>
+
             <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
             <p style="font-size: 11px; color: #aaa; text-align: center; margin: 0;">
                 Mensaje automático de CaloFit &mdash; Por favor no respondas a este correo.
@@ -373,6 +396,10 @@ class EmailService:
             <p style="color: #666; font-size: 12px; line-height: 1.5; text-align: center;">
                 Recibes este correo porque configuraste un recordatorio diario en tu perfil. Puedes cambiar la hora o desactivarlo desde la aplicación.
             </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
+            </div>
         </div>
         """
 
