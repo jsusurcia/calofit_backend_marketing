@@ -345,54 +345,57 @@ class EmailService:
     @staticmethod
     def send_meal_reminder_email(email_to: str, client_name: str):
         """Envía un recordatorio al cliente para que registre sus comidas."""
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
+        import requests
         import os
 
-        gmail_user = os.getenv("GMAIL_SENDER")
-        gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
 
-        if not gmail_user or not gmail_password:
-            print("Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD para el recordatorio de comidas")
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER para el recordatorio de comidas")
             return None
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "¡Es hora de registrar tus comidas en CaloFit!"
-        msg["From"] = f"CaloFit <{gmail_user}>"
-        msg["To"] = email_to
 
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
+                <img src="https://TU_BACKEND_URL/assets/images/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
-            
+
             <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola, <b>{client_name}</b>!</p>
             <p style="color: #333; font-size: 15px; line-height: 1.5;">
                 Este es tu recordatorio diario para registrar tus comidas de hoy. Hacerlo te ayuda a mantener el control de tus calorías y macros, ¡acelerando tus resultados!
             </p>
-            
+
             <div style="text-align: center; margin: 30px 0;">
                 <a href="https://calofit-frontend-production.up.railway.app/cliente/dashboard" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Ir a mi Dashboard</a>
             </div>
-            
+
             <p style="color: #666; font-size: 12px; line-height: 1.5; text-align: center;">
                 Recibes este correo porque configuraste un recordatorio diario en tu perfil. Puedes cambiar la hora o desactivarlo desde la aplicación.
             </p>
         </div>
         """
-        
-        parte_html = MIMEText(html_body, "html")
-        msg.attach(parte_html)
+
+        payload = {
+            "sender": {"name": "CaloFit", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": "¡Es hora de registrar tus comidas en CaloFit!",
+            "htmlContent": html_body,
+        }
 
         try:
-            server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-            server.login(gmail_user, gmail_password)
-            server.sendmail(gmail_user, email_to, msg.as_string())
-            server.quit()
-            print(f"Recordatorio de comidas enviado a {email_to}")
-            return True
-        except Exception as e:
-            print(f"Error enviando recordatorio de comidas: {e}")
+            response = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "accept": "application/json",
+                    "api-key": api_key,
+                    "content-type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            print(f"Recordatorio de comidas enviado a {email_to} vía Brevo")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error enviando recordatorio de comidas vía Brevo: {e}")
             return None
