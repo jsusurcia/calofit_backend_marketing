@@ -16,7 +16,9 @@ class EmailService:
                 "subject": f"{code} es tu código de seguridad CaloFit",
                 "html": f"""
                 <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-                    <h2 style="color: #4CAF50; text-align: center;">CaloFit</h2>
+                    <div style="text-align: center; margin-bottom: 12px;">
+                        <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
+                    </div>
                     <p>Has solicitado restablecer tu contraseña. Usa el siguiente código:</p>
                     <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #333;">
                         {code}
@@ -43,10 +45,9 @@ class EmailService:
                 "html": f"""
                 <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
                     <div style="text-align: center; margin-bottom: 20px;">
-                        <h1 style="color: #1E88E5; margin: 0; font-size: 28px;">CaloFit</h1>
-                        <p style="color: #666; margin-top: 5px; font-size: 14px;">Tu camino a una vida saludable</p>
+                        <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
                     </div>
-                    
+
                     <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola!</p>
                     <p style="color: #333; font-size: 15px; line-height: 1.5;">
                         Tu nutricionista <b>{nutricionista_name}</b> acaba de crear tu cuenta en nuestra plataforma premium.
@@ -102,10 +103,9 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <h1 style="color: #1E88E5; margin: 0; font-size: 28px;">CaloFit</h1>
-                <p style="color: #666; margin-top: 5px; font-size: 14px;">Tu camino a una vida saludable</p>
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
-            
+
             <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola!</p>
             <p style="color: #333; font-size: 15px; line-height: 1.5;">
                 Tu nutricionista <b>{nutricionista_name}</b> acaba de crear tu cuenta en nuestra plataforma premium.
@@ -165,10 +165,9 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <h1 style="color: #1E88E5; margin: 0; font-size: 28px;">CaloFit</h1>
-                <p style="color: #666; margin-top: 5px; font-size: 14px;">Tu camino a una vida saludable</p>
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
-            
+
             <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola!</p>
             <p style="color: #333; font-size: 15px; line-height: 1.5;">
                 Tu nutricionista <b>{nutricionista_name}</b> te registró en nuestra plataforma premium.
@@ -227,8 +226,7 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <h1 style="color: #1E88E5; margin: 0; font-size: 28px;">CaloFit</h1>
-                <p style="color: #666; margin-top: 5px; font-size: 14px;">Recuperación de Contraseña</p>
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
             
             <p style="color: #333; font-size: 15px; line-height: 1.5;">Hola,</p>
@@ -286,8 +284,7 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 480px; margin: auto; border: 1px solid #eee; padding: 28px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.06);">
             <div style="text-align: center; margin-bottom: 24px;">
-                <h1 style="color: #1E88E5; margin: 0; font-size: 30px;">CaloFit</h1>
-                <p style="color: #888; margin-top: 6px; font-size: 13px;">Tu camino a una vida saludable</p>
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
 
             <p style="color: #333; font-size: 15px; line-height: 1.6;">{saludo}</p>
@@ -368,8 +365,7 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <h1 style="color: #4CAF50; margin: 0; font-size: 28px;">CaloFit</h1>
-                <p style="color: #666; margin-top: 5px; font-size: 14px;">Tu asistente nutricional inteligente</p>
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
             
             <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola, <b>{client_name}</b>!</p>
@@ -399,4 +395,4 @@ class EmailService:
             return True
         except Exception as e:
             print(f"Error enviando recordatorio de comidas: {e}")
-            return None
+            return None
