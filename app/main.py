@@ -76,7 +76,6 @@ if not os.path.exists(UPLOAD_DIR):
 
 # Servir archivos estáticos
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-app.mount("/assets", StaticFiles(directory="app/assets"), name="assets")
 
 # ✅ REMOVER REGISTRO DIRECTO - YA ESTÁ EN api_router
 # app.include_router(clientes_router, prefix="/clientes", tags=["clientes"])
