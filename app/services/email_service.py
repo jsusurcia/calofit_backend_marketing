@@ -381,7 +381,7 @@ class EmailService:
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
-                <img src="https://TU_BACKEND_URL/assets/images/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
             </div>
 
             <p style="color: #333; font-size: 15px; line-height: 1.5;">¡Hola, <b>{client_name}</b>!</p>
@@ -397,9 +397,6 @@ class EmailService:
                 Recibes este correo porque configuraste un recordatorio diario en tu perfil. Puedes cambiar la hora o desactivarlo desde la aplicación.
             </p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
-            <div style="text-align: center; margin: 20px 0;">
-                <a href="https://calofit-frontend-production.up.railway.app" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a CaloFit</a>
-            </div>
         </div>
         """
 
