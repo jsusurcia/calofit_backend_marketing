@@ -36,8 +36,9 @@ def run_meal_reminders():
 
         for cliente in clientes:
             if cliente.meal_reminder_time:
-                # Comparamos si la hora (ej: "20") coincide con el inicio de meal_reminder_time
-                if cliente.meal_reminder_time.startswith(current_hour):
+                # Normalizamos ambos lados para soportar "8:00" y "08:00" por igual
+                stored_hour = cliente.meal_reminder_time.split(":")[0].zfill(2)
+                if stored_hour == current_hour:
                     print(f"Enviando recordatorio a {cliente.email} (Hora configurada: {cliente.meal_reminder_time})")
                     EmailService.send_meal_reminder_email(
                         email_to=cliente.email, 
