@@ -4,6 +4,7 @@ from app.core.database import get_db
 from app.api.routes.auth import get_current_user
 from app.models.client import Client
 from app.models.historial import ProgresoCalorias
+from app.models.comida_registro import ComidaRegistro
 from app.models.nutricion import PlanNutricional, PlanDiario
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
@@ -160,6 +161,25 @@ async def obtener_balance_hoy(
                 }
             }
             for alimento in alimentos_hoy
+        ],
+        "comidas_registradas": [
+            {
+                "id": c.id,
+                "momento": c.momento or "otro",
+                "nombre": c.texto_original or c.nombre_alimento,
+                "gramos": c.gramos,
+                "macros": {
+                    "calorias": c.kcal,
+                    "proteinas": c.proteina_g,
+                    "carbohidratos": c.carbohidratos_g,
+                    "grasas": c.grasas_g
+                },
+                "hora_registro": c.created_at.strftime("%H:%M:%S") if c.created_at else None
+            }
+            for c in db.query(ComidaRegistro).filter(
+                ComidaRegistro.client_id == cliente.id,
+                ComidaRegistro.fecha == hoy
+            ).order_by(ComidaRegistro.created_at.desc()).all()
         ],
         "ejercicios_registrados": [
             {

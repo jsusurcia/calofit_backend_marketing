@@ -11,6 +11,7 @@ from app.models.pago import Pago
 from app.models.user import User
 from app.api.routes.auth import get_current_user, get_current_staff
 from app.schemas.pago import PagoCreate, PagoRechazar, PagoResponse, PagoListItem, PagoAprobar
+from app.services.email_service import EmailService
 from typing import Optional
 
 router = APIRouter()
@@ -236,6 +237,19 @@ def aprobar_pago(
     cliente = db.query(Client).filter(Client.id == pago.client_id).first()
     if cliente:
         cliente.is_active = True
+        
+        # Enviar comprobante de pago
+        try:
+            nombre_cliente = f"{cliente.first_name} {cliente.last_name_paternal}".strip() if cliente.first_name else "Usuario"
+            EmailService.send_payment_receipt_brevo(
+                email_to=cliente.email,
+                client_name=nombre_cliente,
+                pago_id=pago.id,
+                monto=pago.monto,
+                fecha=pago.fecha_validacion.strftime("%d/%m/%Y")
+            )
+        except Exception as e:
+            print(f"No se pudo enviar comprobante de pago: {e}")
 
     db.commit()
     db.refresh(pago)

@@ -423,3 +423,74 @@ class EmailService:
         except requests.exceptions.RequestException as e:
             print(f"Error enviando recordatorio de comidas vía Brevo: {e}")
             return None
+
+    @staticmethod
+    def send_payment_receipt_brevo(email_to: str, client_name: str, pago_id: int, monto: float, fecha: str):
+        """Envía un comprobante de pago al cliente."""
+        import requests
+        import os
+
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
+
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER para el comprobante de pago")
+            return None
+
+        html_body = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: auto; border: 1px solid #eee; padding: 28px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.06);">
+            <div style="text-align: center; margin-bottom: 24px;">
+                <img src="https://calofit-frontend-production.up.railway.app/calofitlogo.png" alt="CaloFit" style="max-width: 160px; height: auto;">
+            </div>
+
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">¡Hola, <b>{client_name}</b>!</p>
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+                Te confirmamos que hemos recibido tu pago y tu cuenta premium en CaloFit ha sido activada.
+            </p>
+
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 20px; margin: 24px 0; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #1E293B; font-size: 16px; border-bottom: 1px solid #E2E8F0; padding-bottom: 10px;">Comprobante de Pago</h3>
+                <p style="margin: 10px 0 5px; color: #475569; font-size: 14px;"><strong>ID de Pago:</strong> #{pago_id}</p>
+                <p style="margin: 0 0 5px; color: #475569; font-size: 14px;"><strong>Fecha:</strong> {fecha}</p>
+                <p style="margin: 0 0 5px; color: #475569; font-size: 14px;"><strong>Concepto:</strong> Suscripción CaloFit Premium</p>
+                <p style="margin: 15px 0 0; color: #0F172A; font-size: 18px; font-weight: bold; border-top: 1px dashed #CBD5E1; padding-top: 15px; text-align: right;">Total: S/ {monto:.2f}</p>
+            </div>
+
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+                Ya puedes disfrutar de todas las funcionalidades y recibir tu plan nutricional personalizado.
+            </p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="https://calofit-frontend-production.up.railway.app/cliente/dashboard" style="background-color: #125868; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px; display: inline-block;">Ir a mi Dashboard</a>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <p style="font-size: 11px; color: #aaa; text-align: center; margin: 0;">
+                Este documento es un comprobante de pago electrónico. No tiene validez fiscal como factura.
+            </p>
+        </div>
+        """
+
+        payload = {
+            "sender": {"name": "CaloFit", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": f"Comprobante de Pago - CaloFit #{pago_id}",
+            "htmlContent": html_body,
+        }
+
+        try:
+            response = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "accept": "application/json",
+                    "api-key": api_key,
+                    "content-type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            print(f"Comprobante de pago enviado a {email_to} vía Brevo")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error enviando comprobante de pago vía Brevo: {e}")
+            return None

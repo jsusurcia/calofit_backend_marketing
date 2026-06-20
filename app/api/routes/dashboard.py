@@ -9,6 +9,7 @@ from app.models.client import Client
 from app.models.nutricion import PlanDiario, PlanNutricional
 from app.api.routes.auth import get_current_user
 from app.models.historial import ProgresoCalorias, HistorialPeso, HistorialIMC
+from app.models.comida_registro import ComidaRegistro
 from app.core.utils import get_peru_date, get_peru_now, calcular_metabolismo_basal, obtener_macros_desglosados
 
 router = APIRouter()
@@ -171,6 +172,25 @@ async def get_daily_summary(
         "plan_nutricional": plan_objetivo,
         "ai_insight": ai_insight,
         "ai_strategic_focus": cliente.ai_strategic_focus,
+        "comidas_registradas": [
+            {
+                "id": c.id,
+                "momento": c.momento or "otro",
+                "nombre": c.texto_original or c.nombre_alimento,
+                "gramos": c.gramos,
+                "macros": {
+                    "calorias": c.kcal,
+                    "proteinas": c.proteina_g,
+                    "carbohidratos": c.carbohidratos_g,
+                    "grasas": c.grasas_g
+                },
+                "hora_registro": c.created_at.strftime("%H:%M:%S") if c.created_at else None
+            }
+            for c in db.query(ComidaRegistro).filter(
+                ComidaRegistro.client_id == cliente.id,
+                ComidaRegistro.fecha == hoy
+            ).order_by(ComidaRegistro.created_at.desc()).all()
+        ]
     }
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")
