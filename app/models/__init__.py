@@ -17,3 +17,4 @@ from .cache_models import AppCacheAlimentos, AppCachePlatos, AppCacheRutinas, Al
 from .routine_models import Rutina, RutinaEjercicio
 from .workout_models import WorkoutSession, WorkoutSessionEjercicio
 from .pago import Pago
+from .password_reset import PasswordReset
