@@ -18,3 +18,4 @@ from .routine_models import Rutina, RutinaEjercicio
 from .workout_models import WorkoutSession, WorkoutSessionEjercicio
 from .pago import Pago
 from .password_reset import PasswordReset
+from .chat_message import ChatMessage

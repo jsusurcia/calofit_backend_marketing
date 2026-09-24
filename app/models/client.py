@@ -55,6 +55,7 @@ class Client(Base):
 
     comida_registros = relationship("ComidaRegistro", back_populates="cliente", cascade="all, delete-orphan")
     pagos = relationship("Pago", back_populates="cliente", cascade="all, delete-orphan")
+    chat_messages = relationship("ChatMessage", back_populates="cliente", cascade="all, delete-orphan")
 
     phone = Column(String(20), nullable=True)
 

@@ -1,11 +1,14 @@
 import json
 import re
+from datetime import datetime
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.client import Client
 from app.models.nutricion import PlanNutricional, PlanDiario
+from app.models.chat_message import ChatMessage as ChatMessageDB
 from app.api.routes.auth import get_current_user
 from app.services.ia_service import ia_engine
 
@@ -17,6 +20,22 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     action_taken: str | None = None
+
+class ChatHistorialItem(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+class ChatHistorialResponse(BaseModel):
+    mensajes: List[ChatHistorialItem]
+    hay_mas: bool
+
+
+def _guardar_mensaje(db: Session, client_id: int, role: str, content: str) -> None:
+    """Persiste un mensaje del hilo continuo de chat del cliente."""
+    db.add(ChatMessageDB(client_id=client_id, role=role, content=content))
+    db.commit()
 
 
 async def _registrar_comidas_del_dia(mensaje: str, cliente, db: Session) -> ChatResponse:
@@ -128,12 +147,15 @@ async def procesar_mensaje_chat(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
+    _guardar_mensaje(db, cliente.id, "user", data.message)
+
     # Detectar intención de registro de comida ANTES de Gemini
     try:
         modo = await ia_engine.clasificar_modo_asistente(data.message)
         if modo == "registrar_nutricion":
             resultado = await _registrar_comidas_del_dia(data.message, cliente, db)
             if resultado:
+                _guardar_mensaje(db, cliente.id, "assistant", resultado.reply)
                 return resultado
     except Exception as e:
         print(f"[Chat] Error en clasificación/registro: {e}")
@@ -215,24 +237,75 @@ PLAN ACTUAL DEL USUARIO:
                                 comidas_dict[tipo] = nueva_comida
                                 dia_db.comidas = comidas_dict
                                 db.commit()
-                                
-                                return ChatResponse(
+
+                                respuesta = ChatResponse(
                                     reply=f"¡Listo! He cambiado tu {tipo.replace('_', ' ')} del {dia_str.capitalize()} por: {nueva_comida}.",
                                     action_taken="swap"
                                 )
-                        return ChatResponse(reply=f"No pude encontrar el {tipo.replace('_', ' ')} en tu plan del {dia_str.capitalize()}.", action_taken=None)
+                                _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
+                                return respuesta
+                        respuesta = ChatResponse(reply=f"No pude encontrar el {tipo.replace('_', ' ')} en tu plan del {dia_str.capitalize()}.", action_taken=None)
+                        _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
+                        return respuesta
                     else:
-                        return ChatResponse(reply=f"Lo siento, no pude procesar el día '{dia_str}'.", action_taken=None)
+                        respuesta = ChatResponse(reply=f"Lo siento, no pude procesar el día '{dia_str}'.", action_taken=None)
+                        _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
+                        return respuesta
             except json.JSONDecodeError:
                 pass
-                
+
         # Si no hubo JSON de acción válida, devolver el texto limpio
         texto_limpio = re.sub(r"```(?:json)?\s*[\s\S]*?```", "", raw_response).strip()
         if not texto_limpio:
             texto_limpio = raw_response.strip()
-        
+
+        _guardar_mensaje(db, cliente.id, "assistant", texto_limpio)
         return ChatResponse(reply=texto_limpio, action_taken=None)
 
     except Exception as e:
         print(f"Error en chat: {e}")
-        return ChatResponse(reply="Lo siento, tuve un problema procesando tu mensaje. ¿Puedes intentar de nuevo?")
+        mensaje_error = "Lo siento, tuve un problema procesando tu mensaje. ¿Puedes intentar de nuevo?"
+        _guardar_mensaje(db, cliente.id, "assistant", mensaje_error)
+        return ChatResponse(reply=mensaje_error)
+
+
+@router.get("/historial", response_model=ChatHistorialResponse)
+async def obtener_historial_chat(
+    before_id: int | None = None,
+    limite: int = 30,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    Historial paginado del hilo continuo de chat (cursor-based).
+
+    - Sin `before_id`: devuelve los `limite` mensajes más recientes.
+    - Con `before_id`: devuelve los `limite` mensajes anteriores a ese ID
+      (para "cargar más" al scrollear hacia arriba).
+
+    Siempre se devuelve en orden cronológico ascendente (viejo -> nuevo).
+    """
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    limite = max(1, min(limite, 100))
+
+    query = db.query(ChatMessageDB).filter(ChatMessageDB.client_id == cliente.id)
+    if before_id is not None:
+        query = query.filter(ChatMessageDB.id < before_id)
+
+    # Pedimos uno de más para saber si queda historial anterior sin cargar
+    filas = query.order_by(ChatMessageDB.id.desc()).limit(limite + 1).all()
+
+    hay_mas = len(filas) > limite
+    filas = filas[:limite]
+    filas.reverse()
+
+    return ChatHistorialResponse(
+        mensajes=[
+            ChatHistorialItem(id=f.id, role=f.role, content=f.content, created_at=f.created_at)
+            for f in filas
+        ],
+        hay_mas=hay_mas,
+    )

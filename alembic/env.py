@@ -34,6 +34,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.core.database import Base
+import app.models  # noqa: F401 - registra todos los modelos en Base.metadata para autogenerate
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
