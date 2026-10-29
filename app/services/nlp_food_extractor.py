@@ -290,7 +290,7 @@ class NLPFoodExtractor:
                 return []
             return json.loads(m.group(0))
         except Exception as e:
-            print(f"[NLPExtractor] Error parsing LLM JSON: {e}")
+            print(f"[NLPExtractor] Error parsing LLM JSON: {e} | respuesta del LLM: {(locals().get('respuesta') or '')[:160]!r}")
             return []
 
     # ─── PASO 2: Buscar alimento en BD por nombre o alias ─────────────────────

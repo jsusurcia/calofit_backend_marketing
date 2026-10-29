@@ -198,7 +198,7 @@ class AsistenteService:
     # ── 2. Registro por NLP ───────────────────────────────────────────────────
 
     async def registrar_por_nlp(
-        self, mensaje: str, db: Session, current_user, consulta_id: str = None
+        self, mensaje: str, db: Session, current_user, consulta_id: str = None, momento: str = None
     ):
         perfil = db.query(Client).filter(Client.email == current_user.email).first()
         if not perfil:
@@ -215,7 +215,9 @@ class AsistenteService:
         except Exception:
             plan_hoy_data = {"calorias_dia": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}
 
-        return await registro_comida_handler.registrar(mensaje, perfil, plan_hoy_data, db, self.ia)
+        return await registro_comida_handler.registrar(
+            mensaje, perfil, plan_hoy_data, db, self.ia, momento=momento
+        )
 
     # ── 2b. Registro manual ───────────────────────────────────────────────────
 

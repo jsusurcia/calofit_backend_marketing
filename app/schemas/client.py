@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime
 
 # --- TUS ESQUEMAS EXISTENTES ---
 
@@ -46,6 +46,7 @@ class ClientResponse(BaseModel):
     is_profile_complete: bool = False
     meal_reminder_time: Optional[str] = None
     phone: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

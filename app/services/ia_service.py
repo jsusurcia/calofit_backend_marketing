@@ -258,9 +258,33 @@ class IAService:
                 return response.text.strip()
             except Exception as exc:
                 print(f"[Gemini] error, fallback Groq: {exc}")
-        return await self._llamar_groq(prompt, max_tokens=max_tokens, temp=temp, json_mode=json_mode)
+        return await self._llamar_groq_directo(prompt, max_tokens=max_tokens, temp=temp, json_mode=json_mode)
+
+    async def _llamar_gemini(self, prompt: str, temp: float = 0.7, json_mode: bool = False) -> Optional[str]:
+        """Llamada directa a Gemini. Devuelve None si no está disponible o falla."""
+        if not self.gemini_model:
+            return None
+        try:
+            gen_config = {"temperature": temp}
+            if json_mode:
+                gen_config["response_mime_type"] = "application/json"
+            response = await self.gemini_model.generate_content_async(prompt, generation_config=gen_config)
+            return response.text.strip()
+        except Exception as exc:
+            print(f"[Gemini] error en respaldo: {exc}")
+            return None
 
     async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7, json_mode: bool = False) -> str:
+        """Groq con respaldo a Gemini: si Groq falla (sin clave, timeout, rate limit, error), reintenta con Gemini."""
+        resultado = await self._llamar_groq_directo(prompt, max_tokens=max_tokens, temp=temp, json_mode=json_mode)
+        if self.es_fallo_respuesta_llm(resultado) and self.gemini_model:
+            print(f"[Groq] sin respuesta útil ({(resultado or '')[:80]!r}); usando Gemini como respaldo")
+            respaldo = await self._llamar_gemini(prompt, temp=temp, json_mode=json_mode)
+            if respaldo:
+                return respaldo
+        return resultado
+
+    async def _llamar_groq_directo(self, prompt: str, max_tokens: int = 800, temp: float = 0.7, json_mode: bool = False) -> str:
         if not self.groq_client: return "[Modo Offline]"
         try:
             kwargs = {
@@ -282,6 +306,7 @@ class IAService:
             if "429" in err or "rate_limit" in err or "rate limit" in err or "token" in err and "limit" in err:
                 print(f"[Groq] Rate limit alcanzado: {e}")
                 return FALLBACK_MSG_RATE_LIMIT
+            print(f"[Groq] error: {e}")
             return f"[Error: {e}]"
 
     async def recomendar_alimentos_con_groq(

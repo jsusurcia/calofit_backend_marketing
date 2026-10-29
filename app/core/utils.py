@@ -198,8 +198,10 @@ def calcular_metabolismo_basal(cliente) -> float:
         "Sedentario": 1.20,
         "Ligero": 1.375,
         "Moderado": 1.55,
+        "Intenso": 1.725,
         "Activo": 1.725,
-        "Muy activo": 1.90
+        "Muy intenso": 1.90,
+        "Muy activo": 1.90,
     }
     factor = nivel_map.get(getattr(cliente, 'activity_level', 'Sedentario'), 1.20)
     return tmb * factor

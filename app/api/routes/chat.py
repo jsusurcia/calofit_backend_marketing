@@ -20,6 +20,8 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     action_taken: str | None = None
+    # Solo con action_taken="swap_propuesta": {dia, dia_numero, tipo_comida, plato}
+    propuesta: dict | None = None
 
 class ChatHistorialItem(BaseModel):
     id: int
@@ -38,103 +40,44 @@ def _guardar_mensaje(db: Session, client_id: int, role: str, content: str) -> No
     db.commit()
 
 
-async def _registrar_comidas_del_dia(mensaje: str, cliente, db: Session) -> ChatResponse:
-    """Extrae macros del mensaje y registra en ProgresoCalorias + PreferenciaAlimento."""
-    from app.models.historial import ProgresoCalorias
-    from app.models.preferencias import PreferenciaAlimento
-    from app.core.utils import get_peru_date
-    from datetime import datetime
+async def _registrar_comida_por_chat(mensaje: str, db: Session, current_user) -> ChatResponse | None:
+    """
+    Registra la comida con el mismo flujo que POST /asistente/log-inteligente: una fila por alimento en
+    comida_registros (con su momento: se infiere del texto o de la hora de Perú), progreso del día y
+    preferencias. Devuelve None si el mensaje no se pudo tratar como registro, para que siga el chat normal.
+    """
+    from app.services.asistente_service import asistente_service
 
-    peso_kg = float(cliente.weight or 70.0)
-
-    prompt = (
-        "Eres nutricionista. El usuario describe lo que comió hoy en un solo mensaje. "
-        "Extrae TODOS los alimentos/platos mencionados y estima sus macros (porciones típicas peruanas). "
-        "Responde SOLO JSON válido:\n"
-        '{"alimentos": [{"nombre": "string", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}], '
-        '"totales": {"calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}}\n\n'
-        f"Mensaje: \"{mensaje[:800]}\""
-    )
-    raw = await ia_engine._llamar_llm(prompt, max_tokens=600, temp=0.1, json_mode=True)
-
-    try:
-        m = re.search(r"\{[\s\S]*\}", raw)
-        parsed = json.loads(m.group() if m else raw)
-    except Exception:
+    res = await asistente_service.registrar_por_nlp(mensaje, db, current_user)
+    if not isinstance(res, dict):
         return None
 
-    alimentos = parsed.get("alimentos", [])
-    totales = parsed.get("totales", {})
-    if not alimentos or not totales.get("calorias"):
-        return None
+    tipo = res.get("tipo_detectado")
+    datos = res.get("datos") or {}
 
-    cal   = round(float(totales.get("calorias", 0)), 1)
-    prot  = round(float(totales.get("proteinas_g", 0)), 1)
-    carb  = round(float(totales.get("carbohidratos_g", 0)), 1)
-    gras  = round(float(totales.get("grasas_g", 0)), 1)
-
-    hoy = get_peru_date()
-
-    # Actualizar o crear ProgresoCalorias
-    progreso = db.query(ProgresoCalorias).filter(
-        ProgresoCalorias.client_id == cliente.id,
-        ProgresoCalorias.fecha == hoy
-    ).first()
-    if progreso:
-        progreso.calorias_consumidas = round((progreso.calorias_consumidas or 0) + cal)
-        progreso.proteinas_consumidas = round((progreso.proteinas_consumidas or 0.0) + prot, 1)
-        progreso.carbohidratos_consumidos = round((progreso.carbohidratos_consumidos or 0.0) + carb, 1)
-        progreso.grasas_consumidas = round((progreso.grasas_consumidas or 0.0) + gras, 1)
-    else:
-        progreso = ProgresoCalorias(
-            client_id=cliente.id,
-            fecha=hoy,
-            calorias_consumidas=round(cal),
-            calorias_quemadas=0,
-            proteinas_consumidas=prot,
-            carbohidratos_consumidos=carb,
-            grasas_consumidas=gras,
+    if res.get("success") and tipo == "comida" and datos.get("calorias"):
+        nombres = [str(n).strip() for n in (res.get("alimentos") or []) if str(n).strip()]
+        lista = ", ".join(n[:1].upper() + n[1:] for n in nombres) or "Tu comida"
+        reply = (
+            f"Registrado ✅ Anoté lo que comiste hoy:\n{lista}\n\n"
+            f"Total: {round(float(datos.get('calorias', 0)))} kcal | "
+            f"P: {round(float(datos.get('proteinas_g', 0)), 1)}g | "
+            f"C: {round(float(datos.get('carbohidratos_g', 0)), 1)}g | "
+            f"G: {round(float(datos.get('grasas_g', 0)), 1)}g"
         )
-        db.add(progreso)
+        avisos = [res.get(k) for k in ("advertencia_prohibido", "advertencia_gula", "advertencia_gramaje") if res.get(k)]
+        if avisos:
+            reply += "\n\n" + "\n".join(avisos)
+        return ChatResponse(reply=reply, action_taken="registrar")
 
-    # Crear PreferenciaAlimento por cada ítem (para que aparezca en /balance/hoy)
-    ahora = datetime.utcnow()
-    for item in alimentos:
-        nombre = str(item.get("nombre", "")).strip().lower()
-        if not nombre:
-            continue
-        existente = db.query(PreferenciaAlimento).filter(
-            PreferenciaAlimento.client_id == cliente.id,
-            PreferenciaAlimento.alimento == nombre
-        ).first()
-        if existente:
-            existente.frecuencia = (existente.frecuencia or 0) + 1
-            existente.calorias = round(float(item.get("calorias", 0)), 1)
-            existente.proteinas = round(float(item.get("proteinas_g", 0)), 1)
-            existente.carbohidratos = round(float(item.get("carbohidratos_g", 0)), 1)
-            existente.grasas = round(float(item.get("grasas_g", 0)), 1)
-            existente.ultima_vez = ahora
-        else:
-            db.add(PreferenciaAlimento(
-                client_id=cliente.id,
-                alimento=nombre,
-                frecuencia=1,
-                puntuacion=1.0,
-                calorias=round(float(item.get("calorias", 0)), 1),
-                proteinas=round(float(item.get("proteinas_g", 0)), 1),
-                carbohidratos=round(float(item.get("carbohidratos_g", 0)), 1),
-                grasas=round(float(item.get("grasas_g", 0)), 1),
-                ultima_vez=ahora,
-            ))
-
-    db.commit()
-
-    nombres = ", ".join(a.get("nombre", "") for a in alimentos if a.get("nombre"))
-    reply = (
-        f"Registrado ✅ Anoté lo que comiste hoy:\n{nombres}\n\n"
-        f"Total: {round(cal)} kcal | P: {prot}g | C: {carb}g | G: {gras}g"
+    # Respuestas informativas del registro (duplicado, "no comí nada", ingrediente ficticio, corrección)
+    informativa = (
+        tipo in ("ficcion_bloqueada", "ingrediente_desconocido", "correccion_requerida")
+        or (res.get("success") and (tipo == "ninguno" or (tipo == "comida" and not datos)))
     )
-    return ChatResponse(reply=reply, action_taken="registrar")
+    if informativa and res.get("mensaje"):
+        return ChatResponse(reply=res["mensaje"])
+    return None
 
 
 @router.post("/mensaje", response_model=ChatResponse)
@@ -153,7 +96,7 @@ async def procesar_mensaje_chat(
     try:
         modo = await ia_engine.clasificar_modo_asistente(data.message)
         if modo == "registrar_nutricion":
-            resultado = await _registrar_comidas_del_dia(data.message, cliente, db)
+            resultado = await _registrar_comida_por_chat(data.message, db, current_user)
             if resultado:
                 _guardar_mensaje(db, cliente.id, "assistant", resultado.reply)
                 return resultado
@@ -232,18 +175,22 @@ PLAN ACTUAL DEL USUARIO:
                             swap_res = await ia_engine.generar_swap_comida(comida_actual, tipo, perfil)
                             nueva_comida = swap_res.get("nueva_comida")
                             
-                            if nueva_comida:
-                                comidas_dict = dict(dia_db.comidas)
-                                comidas_dict[tipo] = nueva_comida
-                                dia_db.comidas = comidas_dict
-                                db.commit()
-
+                            if nueva_comida and str(nueva_comida).strip() != str(comida_actual).strip():
                                 respuesta = ChatResponse(
-                                    reply=f"¡Listo! He cambiado tu {tipo.replace('_', ' ')} del {dia_str.capitalize()} por: {nueva_comida}.",
-                                    action_taken="swap"
+                                    reply=f"¡Claro! Te propongo para tu {_nombre_comida(tipo)} del {dia_str.capitalize()}:",
+                                    action_taken="swap_propuesta",
+                                    propuesta={
+                                        "dia": dia_str.capitalize(),
+                                        "dia_numero": dia_num,
+                                        "tipo_comida": tipo,
+                                        "plato": str(nueva_comida).strip(),
+                                    },
                                 )
-                                _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
+                                _guardar_mensaje(db, cliente.id, "assistant", f"{respuesta.reply}\n{nueva_comida}")
                                 return respuesta
+                            respuesta = ChatResponse(reply="No encontré una alternativa distinta por ahora. Intenta de nuevo en un momento.", action_taken=None)
+                            _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
+                            return respuesta
                         respuesta = ChatResponse(reply=f"No pude encontrar el {tipo.replace('_', ' ')} en tu plan del {dia_str.capitalize()}.", action_taken=None)
                         _guardar_mensaje(db, cliente.id, "assistant", respuesta.reply)
                         return respuesta
@@ -267,6 +214,116 @@ PLAN ACTUAL DEL USUARIO:
         mensaje_error = "Lo siento, tuve un problema procesando tu mensaje. ¿Puedes intentar de nuevo?"
         _guardar_mensaje(db, cliente.id, "assistant", mensaje_error)
         return ChatResponse(reply=mensaje_error)
+
+
+# ── Cambio de comida con confirmación ────────────────────────────────────────
+
+_DIAS_NOMBRES = {1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 5: "Viernes", 6: "Sábado", 7: "Domingo"}
+_TIPOS_COMIDA = {"desayuno", "media_manana", "almuerzo", "cena"}
+
+
+def _nombre_comida(tipo: str) -> str:
+    return "snack" if tipo == "media_manana" else tipo
+
+
+class SwapConfirmarRequest(BaseModel):
+    dia_numero: int
+    tipo_comida: str
+    nueva_comida: str
+    texto_usuario: str | None = None
+
+
+class SwapOtraRequest(BaseModel):
+    dia_numero: int
+    tipo_comida: str
+    plato_anterior: str | None = None
+    texto_usuario: str | None = None
+
+
+def _plan_y_dia(db: Session, cliente, dia_numero: int, tipo_comida: str):
+    """Plan más reciente del cliente y el día pedido; valida que exista esa comida."""
+    if tipo_comida not in _TIPOS_COMIDA:
+        raise HTTPException(status_code=400, detail="Tipo de comida no válido")
+    plan = db.query(PlanNutricional).filter(
+        PlanNutricional.client_id == cliente.id
+    ).order_by(PlanNutricional.fecha_creacion.desc()).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="El cliente no tiene un plan")
+    dia = db.query(PlanDiario).filter(
+        PlanDiario.plan_id == plan.id, PlanDiario.dia_numero == dia_numero
+    ).first()
+    if not dia or not dia.comidas or tipo_comida not in dia.comidas:
+        raise HTTPException(status_code=404, detail="No se encontró esa comida en tu plan")
+    return plan, dia
+
+
+@router.post("/swap/confirmar", response_model=ChatResponse)
+async def confirmar_swap(
+    data: SwapConfirmarRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Aplica al plan una comida propuesta previamente y deja el intercambio en el historial del chat."""
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    nueva = (data.nueva_comida or "").strip()[:500]
+    if not nueva:
+        raise HTTPException(status_code=400, detail="Falta la comida a aplicar")
+    _, dia = _plan_y_dia(db, cliente, data.dia_numero, data.tipo_comida)
+
+    _guardar_mensaje(db, cliente.id, "user", (data.texto_usuario or "Sí, cámbiala")[:500])
+
+    comidas = dict(dia.comidas)
+    comidas[data.tipo_comida] = nueva
+    dia.comidas = comidas
+    db.commit()
+
+    reply = (
+        f"¡Listo! Cambié tu {_nombre_comida(data.tipo_comida)} del "
+        f"{_DIAS_NOMBRES.get(data.dia_numero, 'día')} por: {nueva}."
+    )
+    _guardar_mensaje(db, cliente.id, "assistant", reply)
+    return ChatResponse(reply=reply, action_taken="swap")
+
+
+@router.post("/swap/otra", response_model=ChatResponse)
+async def otra_opcion_swap(
+    data: SwapOtraRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Genera otra alternativa para la misma comida (sin aplicarla) y la deja en el historial."""
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    plan, dia = _plan_y_dia(db, cliente, data.dia_numero, data.tipo_comida)
+    _guardar_mensaje(db, cliente.id, "user", (data.texto_usuario or "Otra opción")[:500])
+
+    base = (data.plato_anterior or "").strip() or str(dia.comidas[data.tipo_comida])
+    resultado = await ia_engine.generar_swap_comida(base, data.tipo_comida, {"goal": plan.objetivo})
+    nueva = (resultado.get("nueva_comida") or "").strip()
+
+    if not nueva or nueva == base:
+        reply = "No encontré otra alternativa por ahora. Puedes intentarlo de nuevo en un momento."
+        _guardar_mensaje(db, cliente.id, "assistant", reply)
+        return ChatResponse(reply=reply)
+
+    nombre_dia = _DIAS_NOMBRES.get(data.dia_numero, "día")
+    reply = f"Otra opción para tu {_nombre_comida(data.tipo_comida)} del {nombre_dia}:"
+    _guardar_mensaje(db, cliente.id, "assistant", f"{reply}\n{nueva}")
+    return ChatResponse(
+        reply=reply,
+        action_taken="swap_propuesta",
+        propuesta={
+            "dia": nombre_dia,
+            "dia_numero": data.dia_numero,
+            "tipo_comida": data.tipo_comida,
+            "plato": nueva,
+        },
+    )
 
 
 @router.get("/historial", response_model=ChatHistorialResponse)

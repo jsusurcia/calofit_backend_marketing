@@ -170,6 +170,9 @@ def _validar_gramaje_extraccion(extraccion: dict) -> Optional[str]:
     return None
 
 
+_MOMENTOS_VALIDOS = {"desayuno", "almuerzo", "merienda", "cena", "snack"}
+
+
 def _inferir_momento_dia_por_hora() -> Optional[str]:
     """
     Mapea la hora actual del servidor (Perú, UTC-5) al momento del día.
@@ -359,8 +362,13 @@ class RegistroComidaHandler:
         plan_hoy_data: dict,
         db: Session,
         ia_engine,
+        momento: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Procesa texto/voz para registrar alimentos. Devuelve dict de respuesta."""
+        """Procesa texto/voz para registrar alimentos. Devuelve dict de respuesta.
+
+        ``momento`` (opcional) fuerza el momento del día ('desayuno', 'almuerzo', 'merienda',
+        'cena', 'snack'); si no viene, se infiere del texto o de la hora (Perú).
+        """
         # "no sé" mode
         if _es_respuesta_no_se(mensaje):
             return self._respuesta_porcion_estandar_generica(mensaje, db)
@@ -427,7 +435,9 @@ class RegistroComidaHandler:
                     except Exception as _e5:
                         logger.error("LLM extra para '%s' falló: %s", _item, _e5)
 
-        return await self._aplicar_y_persistir(pre_extraccion, perfil, plan_hoy_data, db, ia_engine, mensaje)
+        return await self._aplicar_y_persistir(
+            pre_extraccion, perfil, plan_hoy_data, db, ia_engine, mensaje, momento_forzado=momento
+        )
 
     # ── Modo Estándar ─────────────────────────────────────────────────────────
 
@@ -843,6 +853,7 @@ class RegistroComidaHandler:
         db: Session,
         ia_engine,
         mensaje: str,
+        momento_forzado: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Acumula en progreso_calorias y devuelve el dict de respuesta final."""
         if not extraccion:
@@ -894,7 +905,8 @@ class RegistroComidaHandler:
             }
 
         hoy     = get_peru_date()
-        momento = _inferir_momento_dia(mensaje)
+        _momento_valido = (momento_forzado or "").strip().lower()
+        momento = _momento_valido if _momento_valido in _MOMENTOS_VALIDOS else _inferir_momento_dia(mensaje)
 
         adv_prohibido = advertencia_alimentos_prohibidos(extraccion, perfil)
 
@@ -1150,7 +1162,7 @@ class RegistroComidaHandler:
                     "calidad_nutricional": "Media", "origen": "llm",
                 }
         except Exception as e:
-            logger.error("CAPA 5 LLM error: %s", e)
+            logger.error("CAPA 5 LLM error: %s | respuesta del LLM: %r", e, (locals().get("resp") or "")[:160])
         return None
 
 

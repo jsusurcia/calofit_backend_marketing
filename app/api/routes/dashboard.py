@@ -14,6 +14,60 @@ from app.core.utils import get_peru_date, get_peru_now, calcular_metabolismo_bas
 
 router = APIRouter()
 
+_PALABRAS_CONVERSACIONALES = (
+    "hola", "quiero ", "registr", "comí", "comi ", "desayun", "almorc", "almuerz", "cené", "cene ", "cena ",
+)
+
+
+def _es_texto_conversacional(texto: str) -> bool:
+    t = texto.lower()
+    return any(p in t for p in _PALABRAS_CONVERSACIONALES)
+
+
+def _agrupar_comidas(registros) -> list:
+    """
+    Un mensaje con varios alimentos crea una fila por alimento en comida_registros (todas con el
+    mismo momento, texto original y created_at). Se devuelve UNA entrada por comida registrada,
+    con los macros sumados y la lista de alimentos; `ids` permite referirse a todas sus filas.
+    """
+    grupos: dict = {}
+    for c in registros:
+        # Sin texto original no se puede saber qué filas van juntas: cada una es su propio grupo
+        clave = (c.momento or "otro", c.texto_original, c.created_at) if c.texto_original else ("id", c.id)
+        g = grupos.get(clave)
+        if g is None:
+            g = {
+                "id": c.id,
+                "ids": [],
+                "momento": c.momento or "otro",
+                "texto_original": c.texto_original,
+                "alimentos": [],
+                "macros": {"calorias": 0.0, "proteinas": 0.0, "carbohidratos": 0.0, "grasas": 0.0},
+                # created_at se guarda en UTC (func.now() del servidor); se muestra en hora de Perú (UTC-5)
+                "hora_registro": (c.created_at - timedelta(hours=5)).strftime("%H:%M:%S") if c.created_at else None,
+            }
+            grupos[clave] = g
+        g["ids"].append(c.id)
+        g["alimentos"].append(c.nombre_alimento)
+        g["macros"]["calorias"] += c.kcal or 0
+        g["macros"]["proteinas"] += c.proteina_g or 0
+        g["macros"]["carbohidratos"] += c.carbohidratos_g or 0
+        g["macros"]["grasas"] += c.grasas_g or 0
+
+    resultado = []
+    for g in grupos.values():
+        texto = g.pop("texto_original")
+        # "[cache]" es un marcador interno y los mensajes de chat ("quiero registrar que comí…") no son
+        # un buen nombre: en ambos casos se muestran los alimentos detectados
+        if texto and not texto.startswith("[") and not _es_texto_conversacional(texto):
+            g["nombre"] = texto
+        else:
+            g["nombre"] = ", ".join(a[:1].upper() + a[1:] for a in dict.fromkeys(g["alimentos"]))
+        g["macros"] = {k: round(v, 1) for k, v in g["macros"].items()}
+        resultado.append(g)
+    return resultado
+
+
 @router.get("/clientes/{cliente_id}/resumen-diario")
 async def get_daily_summary(
     cliente_id: int,
@@ -172,25 +226,12 @@ async def get_daily_summary(
         "plan_nutricional": plan_objetivo,
         "ai_insight": ai_insight,
         "ai_strategic_focus": cliente.ai_strategic_focus,
-        "comidas_registradas": [
-            {
-                "id": c.id,
-                "momento": c.momento or "otro",
-                "nombre": c.texto_original or c.nombre_alimento,
-                "gramos": c.gramos,
-                "macros": {
-                    "calorias": c.kcal,
-                    "proteinas": c.proteina_g,
-                    "carbohidratos": c.carbohidratos_g,
-                    "grasas": c.grasas_g
-                },
-                "hora_registro": c.created_at.strftime("%H:%M:%S") if c.created_at else None
-            }
-            for c in db.query(ComidaRegistro).filter(
+        "comidas_registradas": _agrupar_comidas(
+            db.query(ComidaRegistro).filter(
                 ComidaRegistro.client_id == cliente.id,
                 ComidaRegistro.fecha == hoy
             ).order_by(ComidaRegistro.created_at.desc()).all()
-        ]
+        ),
     }
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")

@@ -32,6 +32,9 @@ class ChatRequest(BaseModel):
     contexto_manual: str = None
     override_ia: str = None
     consulta_id: str = None
+    # Solo para /log-inteligente: momento del día de la comida
+    # ('desayuno' | 'almuerzo' | 'merienda' | 'cena' | 'snack'). Si falta, se infiere del texto/hora.
+    momento: str = None
 
 
 class RegistroManualAlimentoRequest(BaseModel):
@@ -116,6 +119,7 @@ async def registro_inteligente_nlp(
             db=db,
             current_user=current_user,
             consulta_id=body.consulta_id,
+            momento=body.momento,
         )
         return resultado
     except ValueError as e:

@@ -66,7 +66,7 @@ async def obtener_balance_hoy(
         genero_map = {"M": 1, "F": 2}
         genero = genero_map.get(cliente.gender, 1)
         edad = (date.today().year - cliente.birth_date.year) if cliente.birth_date else 25
-        nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
+        nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Intenso": 1.725, "Activo": 1.725, "Muy intenso": 1.90, "Muy activo": 1.90}
         nivel_actividad = nivel_map.get(cliente.activity_level, 1.20)
         objetivo_map = {"Perder peso": "perder", "Mantener peso": "mantener", "Ganar masa": "ganar"}
         objetivo = objetivo_map.get(cliente.goal, "mantener")
@@ -132,6 +132,15 @@ async def obtener_balance_hoy(
             func.date(PreferenciaEjercicio.ultima_vez) == hoy,
         ).all()
     
+    registros_comida_hoy = db.query(ComidaRegistro).filter(
+        ComidaRegistro.client_id == cliente.id,
+        ComidaRegistro.fecha == hoy
+    ).order_by(ComidaRegistro.created_at.desc()).all()
+    _textos_comida: Dict[str, int] = {}
+    for _c in registros_comida_hoy:
+        if _c.texto_original:
+            _textos_comida[_c.texto_original] = _textos_comida.get(_c.texto_original, 0) + 1
+
     return {
         "fecha": hoy.isoformat(),
         "resumen": {
@@ -166,7 +175,13 @@ async def obtener_balance_hoy(
             {
                 "id": c.id,
                 "momento": c.momento or "otro",
-                "nombre": c.texto_original or c.nombre_alimento,
+                # Un mensaje con varios alimentos crea una fila por alimento, todas con el mismo
+                # texto_original: en ese caso se muestra el nombre de cada alimento.
+                "nombre": (
+                    c.nombre_alimento.capitalize()
+                    if c.texto_original and _textos_comida[c.texto_original] > 1
+                    else (c.texto_original or c.nombre_alimento)
+                ),
                 "gramos": c.gramos,
                 "macros": {
                     "calorias": c.kcal,
@@ -176,10 +191,7 @@ async def obtener_balance_hoy(
                 },
                 "hora_registro": c.created_at.strftime("%H:%M:%S") if c.created_at else None
             }
-            for c in db.query(ComidaRegistro).filter(
-                ComidaRegistro.client_id == cliente.id,
-                ComidaRegistro.fecha == hoy
-            ).order_by(ComidaRegistro.created_at.desc()).all()
+            for c in registros_comida_hoy
         ],
         "ejercicios_registrados": [
             {

@@ -173,16 +173,28 @@ async def generar_plan_automatico_endpoint(
     if not plan_semanal_json:
         raise HTTPException(status_code=500, detail="Error al generar plan con IA")
         
+    # Meta diaria real del cliente (misma fórmula que usa el recálculo al editar el perfil)
+    from app.services.calculador_dieta import CalculadorDietaAutomatica
+    nivel_actividad = cliente.activity_level or "Moderado"
+    meta = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
+        peso=float(cliente.weight or 70),
+        altura=float(cliente.height or 170),
+        edad=edad,
+        genero=cliente.gender or "M",
+        nivel_actividad=nivel_actividad,
+        objetivo=cliente.goal or "Mantener peso",
+    )
+
     plan_maestro = PlanNutricional(
         client_id=cliente.id,
         genero=1 if cliente.gender == "M" else 2,
         edad=edad,
         peso=cliente.weight or 0,
         talla=cliente.height or 0,
-        nivel_actividad=1.55,
+        nivel_actividad=CalculadorDietaAutomatica.get_factor_actividad(nivel_actividad),
         objetivo=cliente.goal or "Mantener peso",
         es_contingencia_ia=False,
-        calorias_ia_base=2000,
+        calorias_ia_base=round(meta.calorias_diarias),
         status="draft_ia"
     )
     db.add(plan_maestro)
@@ -194,10 +206,10 @@ async def generar_plan_automatico_endpoint(
         plan_dia = PlanDiario(
             plan_id=plan_maestro.id,
             dia_numero=i,
-            calorias_dia=2000,
-            proteinas_g=100,
-            carbohidratos_g=200,
-            grasas_g=60,
+            calorias_dia=round(meta.calorias_diarias),
+            proteinas_g=meta.proteinas_g,
+            carbohidratos_g=meta.carbohidratos_g,
+            grasas_g=meta.grasas_g,
             comidas=comidas_del_dia,
             sugerencia_entrenamiento_ia="Entrenamiento sugerido por IA",
             nota_asistente_ia="Plan generado automáticamente",
